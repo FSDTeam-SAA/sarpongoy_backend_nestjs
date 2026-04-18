@@ -1,67 +1,61 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
-export type UserDocument = HydratedDocument<User>;
+import mongoose, { HydratedDocument, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import config from '../../../config';
+import { UserRole } from '../user-role.enum';
+
+export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({
-    required: [true, 'School name is required'],
-    trim: true,
-  })
+  @Prop({ required: true, trim: true })
   schoolName: string;
 
-  @Prop({
-    required: [true, 'Email is required'],
-    unique: true,
-    lowercase: true,
-    trim: true,
-  })
+  @Prop({ trim: true })
+  firstName: string;
+
+  @Prop({ trim: true })
+  lastName: string;
+
+  @Prop()
+  country: string;
+
+  @Prop({ unique: true, lowercase: true, trim: true, required: true })
   email: string;
 
-  @Prop({
-    required: [true, 'Password is required'],
-    minlength: 6,
-    select: false,
-  })
+  @Prop({ required: true, minlength: 6, select: false })
   password: string;
 
   @Prop({
-    enum: ['school', 'admin'],
-    default: 'school',
+    enum: Object.values(UserRole),
+    default: UserRole.SCHOOL,
   })
-  role: string;
+  role: UserRole;
 
-  @Prop()
-  phoneNumber: string;
+  @Prop() phoneNumber: string;
+  @Prop() address: string;
+  @Prop() schoolLogo: string;
+  @Prop() profilePicture: string;
+  @Prop() uploadeSignature: string;
 
-  @Prop()
-  address: string;
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Subscription' })
+  subscription: Types.ObjectId;
 
-  @Prop()
-  schoolLogo: string;
+  @Prop() bio: string;
+  @Prop() totalStudent: number;
 
-  @Prop()
-  otp?: string;
-
-  @Prop()
-  otpExpiry?: Date;
+  @Prop() otp?: string;
+  @Prop() otpExpiry?: Date;
 
   @Prop({ enum: ['active', 'suspended'], default: 'active' })
   status: string;
 
-  @Prop()
+  @Prop({ default: false })
   verifiedForget: boolean;
-
-  @Prop()
-  stripeAccountId: string;
-
-  @Prop()
-  bio: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
 
 UserSchema.pre('save', async function () {
   if (!this.isModified('password')) return;

@@ -1,101 +1,83 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
   MinLength,
-  IsDateString,
-  IsBoolean,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { UserRole } from '../user-role.enum';
 
 export class CreateUserDto {
-  @ApiProperty({ example: '' })
+  @ApiPropertyOptional({ example: 'ABC School' })
   @IsString()
-  fullName: string;
+  @IsOptional()
+  schoolName: string;
 
-  @ApiProperty({ example: '' })
-  @IsEmail()
-  email: string;
-
-  @ApiProperty({ example: '' })
+  @ApiPropertyOptional({ example: 'saurav' })
   @IsString()
-  @MinLength(6)
-  password: string;
-
-  @ApiPropertyOptional({ enum: ['user', 'admin'] })
   @IsOptional()
-  @IsEnum(['user', 'admin'])
-  role?: string;
+  firstName: string;
 
-  @ApiPropertyOptional({ enum: ['male', 'female'] })
-  @IsOptional()
-  @IsEnum(['male', 'female'])
-  gender?: string;
-
-  @ApiPropertyOptional({ example: '' })
-  @IsOptional()
+  @ApiPropertyOptional({ example: 'sarkar' })
   @IsString()
-  phoneNumber?: string;
+  @IsOptional()
+  lastName: string;
 
-  @ApiPropertyOptional({ example: '' })
+  @ApiPropertyOptional({ example: 'Bangladesh' })
+  @IsString()
+  @IsOptional()
+  country: string;
+
+  @ApiPropertyOptional({ type: 'string', format: 'binary' })
   @IsOptional()
   @IsString()
   profilePicture?: string;
 
-  @ApiPropertyOptional({ example: '' })
+  @ApiPropertyOptional({ example: 'school@gmail.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiPropertyOptional({ example: '123456' })
+  @IsString()
+  @MinLength(6)
+  password: string;
+
+  @ApiPropertyOptional({ enum: UserRole, default: UserRole.SCHOOL })
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole;
+
+  @ApiPropertyOptional({ example: '017XXXXXXXX' })
   @IsOptional()
   @IsString()
-  country?: string;
+  phoneNumber?: string;
 
-  @ApiPropertyOptional({ example: '' })
-  @IsOptional()
-  @IsString()
-  city?: string;
-
-  @ApiPropertyOptional({ example: '' })
+  @ApiPropertyOptional({ example: 'Dhaka, Bangladesh' })
   @IsOptional()
   @IsString()
   address?: string;
 
-  @ApiPropertyOptional({ example: '' })
-  @IsOptional()
-  @IsDateString()
-  dateOfBirth?: Date;
-
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: 'string', format: 'binary' })
   @IsOptional()
   @IsString()
-  otp?: string;
+  schoolLogo?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  otpExpiry?: Date;
-
-  @ApiPropertyOptional()
-  @IsBoolean()
-  @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value.toLowerCase() === 'true';
-    }
-    return value;
-  })
-  verifiedForget?: boolean;
-
-  @ApiPropertyOptional({ enum: ['active', 'suspended'] })
-  @IsString()
-  @IsOptional()
-  status?: string;
-
-  @ApiPropertyOptional({ example: '' })
-  @IsOptional()
-  @IsString()
-  stripeAccountId?: string;
-
-  @ApiPropertyOptional({ example: '' })
+  @ApiPropertyOptional({ example: 'This is school bio' })
   @IsOptional()
   @IsString()
   bio?: string;
+
+  @ApiPropertyOptional({ type: 'string', format: 'binary' })
+  @IsOptional()
+  @IsString()
+  uploadeSignature?: string;
+
+  @ApiPropertyOptional({ example: 500 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  totalStudent?: number;
 }
