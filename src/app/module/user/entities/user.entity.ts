@@ -56,7 +56,6 @@ export class User {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
-
 UserSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
 
