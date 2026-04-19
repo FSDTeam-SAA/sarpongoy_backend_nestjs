@@ -11,6 +11,7 @@ import { AuthModule } from './app/module/auth/auth.module';
 import { UserModule } from './app/module/user/user.module';
 import { SubscribeModule } from './app/module/subscribe/subscribe.module';
 import { SchoolModule } from './app/module/school/school.module';
+import { ContactModule } from './app/module/contact/contact.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SchoolModule } from './app/module/school/school.module';
     UserModule,
     SubscribeModule,
     SchoolModule,
+    ContactModule,
   ],
 
   controllers: [AppController],

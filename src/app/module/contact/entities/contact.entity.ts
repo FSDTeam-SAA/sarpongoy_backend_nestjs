@@ -6,7 +6,7 @@ export type ContactDocument = HydratedDocument<Contact>;
 @Schema({ timestamps: true })
 export class Contact {
   @Prop()
-  fullName: string;
+  schoolName: string;
 
   @Prop()
   email: string;

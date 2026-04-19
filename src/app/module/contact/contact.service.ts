@@ -23,7 +23,7 @@ export class ContactService {
 
   async getAllContacts(params: IFilterParams, options: IOptions) {
     const { limit, page, skip, sortBy, sortOrder } = paginationHelper(options);
-    const searchAbleFields = ['fullName', 'email', 'phoneNumber', 'message'];
+    const searchAbleFields = ['schoolName', 'email', 'phoneNumber', 'message'];
 
     const whenConditation = buildWhereConditions(params, searchAbleFields);
 

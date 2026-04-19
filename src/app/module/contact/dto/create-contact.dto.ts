@@ -4,7 +4,7 @@ import { IsEmail, IsOptional, IsString } from 'class-validator';
 export class CreateContactDto {
   @ApiPropertyOptional({ example: '' })
   @IsString()
-  fullName: string;
+  schoolName: string;
 
   @ApiPropertyOptional({ example: '' })
   @IsEmail()
