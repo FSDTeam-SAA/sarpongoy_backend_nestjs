@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,8 +12,8 @@ import {
 import { UserRole } from '../user-role.enum';
 
 export class CreateUserDto {
-  @ApiPropertyOptional({ example: 'ABC School' })
-  @IsString()
+  @ApiPropertyOptional({ example: '69189747004459816445708b' })
+  @IsMongoId()
   @IsOptional()
   schoolName: string;
 

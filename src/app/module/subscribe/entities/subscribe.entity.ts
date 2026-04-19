@@ -5,17 +5,23 @@ export type SubscribeDocument = HydratedDocument<Subscribe>;
 
 @Schema({ timestamps: true })
 export class Subscribe {
-  @Prop()
-  planName: string;
+  @Prop({ required: true, unique: true })
+  name: string;
 
-  @Prop()
+  @Prop({ required: true })
   price: number;
 
-  @Prop()
+  @Prop({ required: true })
   features: string[];
 
-  @Prop({ type: [mongoose.Schema.Types.ObjectId], ref: 'User', default: [] })
-  user: Types.ObjectId[];
+  @Prop({ type: Number, default: 0 })
+  months: number;
+
+  @Prop({ enum: ['active', 'inactive'], default: 'active' })
+  status: string;
+
+  @Prop({ type: [mongoose.Schema.Types.ObjectId], ref: 'User' })
+  subscribeSchools: Types.ObjectId[];
 }
 
 export const SubscribeSchema = SchemaFactory.createForClass(Subscribe);

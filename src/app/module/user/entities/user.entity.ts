@@ -8,8 +8,8 @@ export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ required: true, trim: true })
-  schoolName: string;
+  @Prop({ type: Types.ObjectId, ref: 'School' })
+  schoolName: Types.ObjectId;
 
   @Prop({ trim: true })
   firstName: string;

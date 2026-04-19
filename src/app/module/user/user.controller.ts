@@ -80,11 +80,11 @@ export class UserController {
     description: 'Search by ',
   })
   @ApiQuery({
-    name: 'fullName',
+    name: 'schoolName',
     required: false,
     type: String,
     example: '',
-    description: 'Filter by exact fullName',
+    description: 'Filter by exact schoolName value',
   })
   @ApiQuery({
     name: 'email',
@@ -101,46 +101,11 @@ export class UserController {
     description: 'Filter by role value',
   })
   @ApiQuery({
-    name: 'gender',
-    required: false,
-    type: String,
-    example: '',
-    description: 'Filter by gender value',
-  })
-  @ApiQuery({
     name: 'phoneNumber',
     required: false,
     type: String,
     example: '',
     description: 'Filter by phoneNumber value',
-  })
-  @ApiQuery({
-    name: 'country',
-    required: false,
-    type: String,
-    example: '',
-    description: 'Filter by country value',
-  })
-  @ApiQuery({
-    name: 'city',
-    required: false,
-    type: String,
-    example: '',
-    description: 'Filter by city value',
-  })
-  @ApiQuery({
-    name: 'address',
-    required: false,
-    type: String,
-    example: '',
-    description: 'Filter by address value',
-  })
-  @ApiQuery({
-    name: 'status',
-    required: false,
-    type: String,
-    example: '',
-    description: 'Filter by status value',
   })
   @ApiQuery({
     name: 'page',
@@ -175,9 +140,10 @@ export class UserController {
   async getAllUser(@Req() req: Request) {
     const params = pick(req.query, [
       'searchTerm',
-      'fullName',
+      'schoolName',
       'email',
-      'status',
+      'role',
+      'phoneNumber',
     ]);
     const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
     const result = await this.userService.getAllUser(params, options);

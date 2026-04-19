@@ -9,6 +9,8 @@ import config from './app/config';
 import { AuthModule } from './app/module/auth/auth.module';
 
 import { UserModule } from './app/module/user/user.module';
+import { SubscribeModule } from './app/module/subscribe/subscribe.module';
+import { SchoolModule } from './app/module/school/school.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { UserModule } from './app/module/user/user.module';
     // WebhookModule,
     AuthModule,
     UserModule,
+    SubscribeModule,
+    SchoolModule,
   ],
 
   controllers: [AppController],

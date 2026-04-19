@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>School Subscription Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --primary:#0f766e;
+    --primary-dark:#115e59;
+    --primary-light:#ccfbf1;
+    --accent:#0891b2;
+    --bg:#f1f5f9;
+    --card:#ffffff;
+    --text:#0f172a;
+    --muted:#64748b;
+    --border:#e2e8f0;
+    --danger:#dc2626;
+    --warn:#f59e0b;
+    --success:#16a34a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}
+  body{background:linear-gradient(135deg,#e0f2fe 0%,#f1f5f9 100%);min-height:100vh;color:var(--text);padding:24px}
+  .container{max-width:1180px;margin:0 auto}
+
+  /* Top summary row */
+  .summary{
+    background:var(--card);
+    border-radius:20px;
+    padding:24px;
+    box-shadow:0 10px 30px rgba(15,23,42,.06);
+    display:grid;
+    grid-template-columns: 1.2fr 1fr 1fr 1fr;
+    gap:16px;
+    align-items:center;
+    border:1px solid var(--border);
+  }
+  .logo-box{
+    display:flex;align-items:center;gap:14px;
+  }
+  .logo-circle{
+    width:72px;height:72px;border-radius:50%;
+    background:linear-gradient(135deg,#e2e8f0,#cbd5e1);
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;overflow:hidden;position:relative;
+    border:2px dashed #94a3b8;
+    transition:.2s;
+  }
+  .logo-circle:hover{border-color:var(--primary)}
+  .logo-circle img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+  .logo-label{font-size:13px;color:var(--muted)}
+  .stat-card{
+    background:linear-gradient(135deg,#f0fdfa,#ecfeff);
+    border-radius:14px;padding:16px 18px;
+    border:1px solid #99f6e4;
+    text-align:center;
+  }
+  .stat-card.alt{background:linear-gradient(135deg,#fef3c7,#fffbeb);border-color:#fde68a}
+  .stat-card.paid{background:linear-gradient(135deg,#dcfce7,#f0fdf4);border-color:#bbf7d0}
+  .stat-label{font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:500}
+  .stat-value{font-size:22px;font-weight:700;color:var(--primary-dark)}
+  .stat-value small{color:var(--muted);font-weight:500;font-size:13px;margin-left:4px}
+  .stat-icon{font-size:18px;margin-right:6px}
+
+  /* Profile form */
+  .card{
+    background:var(--card);
+    border-radius:20px;
+    padding:28px;
+    box-shadow:0 10px 30px rgba(15,23,42,.06);
+    border:1px solid var(--border);
+    margin-top:20px;
+  }
+  .card h2{
+    font-size:18px;margin-bottom:18px;color:var(--primary-dark);
+    display:flex;align-items:center;gap:8px;
+  }
+  .form-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:16px;
+  }
+  .form-field{display:flex;flex-direction:column;gap:6px}
+  .form-field.full{grid-column:1/-1}
+  .form-field label{font-size:13px;font-weight:500;color:var(--muted)}
+  .form-field input, .form-field textarea{
+    border:1px solid var(--border);
+    border-radius:10px;padding:11px 14px;
+    font-size:14px;color:var(--text);
+    background:#f8fafc;transition:.15s;
+  }
+  .form-field input:focus, .form-field textarea:focus{
+    outline:none;border-color:var(--primary);background:#fff;
+    box-shadow:0 0 0 3px rgba(15,118,110,.1);
+  }
+  .form-field textarea{resize:vertical;min-height:80px}
+
+  /* Subscription */
+  .sub-banner{
+    display:flex;justify-content:space-between;align-items:center;
+    background:linear-gradient(135deg,var(--primary),var(--accent));
+    color:#fff;border-radius:16px;padding:20px 24px;
+    margin-top:20px;flex-wrap:wrap;gap:16px;
+  }
+  .sub-info{display:flex;flex-direction:column;gap:4px}
+  .sub-info .plan{font-size:20px;font-weight:700}
+  .sub-info .meta{font-size:13px;opacity:.9}
+  .progress-wrap{
+    background:rgba(255,255,255,.25);height:8px;border-radius:99px;overflow:hidden;
+    min-width:220px;margin-top:6px;
+  }
+  .progress-bar{background:#fff;height:100%;border-radius:99px;transition:width .4s}
+  .upgrade-btn{
+    background:#fff;color:var(--primary-dark);
+    border:none;padding:11px 20px;border-radius:10px;
+    font-weight:600;font-size:14px;cursor:pointer;
+    transition:.15s;box-shadow:0 2px 6px rgba(0,0,0,.1);
+  }
+  .upgrade-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
+  .upgrade-btn.danger{background:#fee2e2;color:var(--danger)}
+
+  /* Students section */
+  .students-header{
+    display:flex;justify-content:space-between;align-items:center;
+    flex-wrap:wrap;gap:12px;margin-bottom:18px;
+  }
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    border:none;cursor:pointer;padding:10px 18px;
+    border-radius:10px;font-size:14px;font-weight:500;
+    transition:.15s;
+  }
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-primary:hover{background:var(--primary-dark)}
+  .btn-outline{background:#fff;color:var(--primary-dark);border:1px solid var(--primary)}
+  .btn-outline:hover{background:var(--primary-light)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+
+  /* Table */
+  .table-wrap{
+    overflow-x:auto;border-radius:12px;border:1px solid var(--border);
+  }
+  table{width:100%;border-collapse:collapse;min-width:700px}
+  thead{background:#f8fafc}
+  thead th{
+    text-align:left;padding:14px 16px;font-size:13px;
+    color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.5px;border-bottom:1px solid var(--border);
+  }
+  tbody td{
+    padding:14px 16px;font-size:14px;
+    border-bottom:1px solid #f1f5f9;color:var(--text);
+  }
+  tbody tr:hover{background:#f8fafc}
+  tbody tr:last-child td{border-bottom:none}
+  .empty-state{
+    text-align:center;padding:50px 20px;color:var(--muted);
+  }
+  .empty-state .emoji{font-size:48px;margin-bottom:12px;opacity:.4}
+
+  /* Modal */
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(15,23,42,.6);
+    display:none;align-items:center;justify-content:center;
+    z-index:100;padding:20px;
+  }
+  .modal-overlay.open{display:flex}
+  .modal{
+    background:#fff;border-radius:18px;padding:28px;
+    max-width:640px;width:100%;max-height:90vh;overflow-y:auto;
+  }
+  .modal h3{font-size:20px;color:var(--primary-dark);margin-bottom:8px}
+  .modal p{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
+  .plan-card{
+    border:2px solid var(--border);border-radius:14px;padding:18px;
+    cursor:pointer;transition:.15s;text-align:center;
+  }
+  .plan-card:hover{border-color:var(--primary);transform:translateY(-2px)}
+  .plan-card.selected{border-color:var(--primary);background:var(--primary-light)}
+  .plan-card .name{font-weight:700;color:var(--primary-dark);margin-bottom:6px}
+  .plan-card .price{font-size:22px;font-weight:800;color:var(--text)}
+  .plan-card .students{font-size:12px;color:var(--muted);margin-top:6px}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+
+  /* Toast */
+  .toast{
+    position:fixed;bottom:24px;right:24px;
+    background:var(--text);color:#fff;padding:14px 20px;
+    border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);
+    font-size:14px;opacity:0;transform:translateY(10px);
+    transition:.3s;z-index:200;pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translateY(0)}
+  .toast.success{background:var(--success)}
+  .toast.error{background:var(--danger)}
+  .toast.warn{background:var(--warn)}
+
+  @media (max-width:780px){
+    .summary{grid-template-columns:1fr 1fr;gap:12px}
+    .logo-box{grid-column:1/-1}
+    .form-grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Top summary -->
+  <div class="summary">
+    <div class="logo-box">
+      <label class="logo-circle" for="logoInput" id="logoCircle" title="Upload logo">
+        <span id="logoPlaceholder" style="font-size:22px;color:#64748b">🏫</span>
+      </label>
+      <input type="file" id="logoInput" accept="image/*" hidden />
+      <div>
+        <div style="font-weight:600">Upload Logo</div>
+        <div class="logo-label">Click circle to upload</div>
+      </div>
+    </div>
+
+    <div class="stat-card alt">
+      <div class="stat-label">📅 Expired Date</div>
+      <div class="stat-value" id="expiryDate">Mar 1, 2026</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">👥 Total Students</div>
+      <div class="stat-value" id="totalStudents">0</div>
+    </div>
+
+    <div class="stat-card paid">
+      <div class="stat-label">💰 Total Paid</div>
+      <div class="stat-value"><span id="paidCount">0</span> <small>(<span id="paidPct">0%</span>)</small></div>
+    </div>
+  </div>
+
+  <!-- School profile -->
+  <div class="card">
+    <h2>🏛️ School Profile</h2>
+    <div class="form-grid">
+      <div class="form-field full">
+        <label>Full Name</label>
+        <input type="text" placeholder="John" value="John" />
+      </div>
+      <div class="form-field">
+        <label>School Name</label>
+        <input type="text" placeholder="School Name" value="TechCorp Inc" />
+      </div>
+      <div class="form-field">
+        <label>Designation</label>
+        <input type="text" placeholder="Designation" value="Principal" />
+      </div>
+      <div class="form-field">
+        <label>Personal Email</label>
+        <input type="email" placeholder="email@example.com" value="john@example.com" />
+      </div>
+      <div class="form-field">
+        <label>Phone Number</label>
+        <input type="tel" placeholder="+1 (555) 123-4567" value="+1 (555) 123-4567" />
+      </div>
+      <div class="form-field full">
+        <label>Bio</label>
+        <textarea placeholder="Short bio about the school / administrator"></textarea>
+      </div>
+      <div class="form-field full">
+        <label>Signature</label>
+        <input type="text" placeholder="Digital signature (type name)" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Subscription banner -->
+  <div class="sub-banner">
+    <div class="sub-info">
+      <div class="plan" id="planName">Starter Plan</div>
+      <div class="meta" id="planMeta">0 / 50 students used · Expires Mar 1, 2026</div>
+      <div class="progress-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+    </div>
+    <button class="upgrade-btn" id="upgradeBtn">⬆ Upgrade Plan</button>
+  </div>
+
+  <!-- Students section -->
+  <div class="card">
+    <div class="students-header">
+      <h2 style="margin:0">👨‍🎓 Added Students</h2>
+      <div class="actions">
+        <button class="btn btn-outline" id="downloadDemoBtn">⬇ Download Demo Excel</button>
+        <button class="btn btn-primary" id="uploadBtn">⬆ Upload Student Data (Excel)</button>
+        <input type="file" id="uploadInput" accept=".xlsx,.xls,.csv" hidden />
+      </div>
+    </div>
+
+    <div class="table-wrap" id="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>School ID</th>
+            <th>School Name</th>
+            <th>Last Name</th>
+            <th>First Name</th>
+            <th>Student ID</th>
+            <th>Grade Level</th>
+          </tr>
+        </thead>
+        <tbody id="studentsTbody">
+          <tr>
+            <td colspan="6">
+              <div class="empty-state">
+                <div class="emoji">📂</div>
+                <div>No students yet. Download the demo Excel and re-upload it to populate this list.</div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Upgrade Modal -->
+<div class="modal-overlay" id="upgradeModal">
+  <div class="modal">
+    <h3>Choose a Subscription Plan</h3>
+    <p>Each plan includes a fixed student capacity. To add more students beyond your current limit, you must upgrade to a larger plan (a new subscription will be created).</p>
+    <div class="plans" id="plansContainer"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelUpgrade">Cancel</button>
+      <button class="btn btn-primary" id="confirmUpgrade">Confirm & Subscribe</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================
+   State
+============================ */
+const PLANS = [
+  { id:'starter',  name:'Starter',  price:29,  students:50  },
+  { id:'growth',   name:'Growth',   price:59,  students:150 },
+  { id:'pro',      name:'Pro',      price:99,  students:300 },
+  { id:'campus',   name:'Campus',   price:199, students:750 },
+];
+
+const state = {
+  currentPlanId: 'starter',
+  paidCount: 0,            // "Total Paid" = plan capacity paid for
+  students: [],
+  expiry: 'Mar 1, 2026',
+  selectedPlanId: null,
+};
+
+/* ============================
+   Helpers
+============================ */
+const $ = (id) => document.getElementById(id);
+const toast = (msg, type='') => {
+  const t = $('toast'); t.textContent = msg; t.className = 'toast show ' + type;
+  setTimeout(()=>t.classList.remove('show'), 2500);
+};
+const currentPlan = () => PLANS.find(p=>p.id===state.currentPlanId);
+
+/* ============================
+   Render
+============================ */
+function render() {
+  const plan = currentPlan();
+  $('totalStudents').textContent = plan.students;
+  const pct = plan.students ? Math.round((state.paidCount/plan.students)*100) : 0;
+  $('paidCount').textContent = state.paidCount;
+  $('paidPct').textContent = pct + '%';
+  $('planName').textContent = plan.name + ' Plan — $' + plan.price + '/yr';
+  $('planMeta').textContent =
+    `${state.students.length} / ${plan.students} students used · Expires ${state.expiry}`;
+  const usagePct = Math.min(100, (state.students.length / plan.students) * 100);
+  $('progressBar').style.width = usagePct + '%';
+
+  // Students table
+  const tbody = $('studentsTbody');
+  if (state.students.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6">
+      <div class="empty-state">
+        <div class="emoji">📂</div>
+        <div>No students yet. Download the demo Excel and re-upload it to populate this list.</div>
+      </div></td></tr>`;
+  } else {
+    tbody.innerHTML = state.students.map(s=>`
+      <tr>
+        <td>${s.schoolId ?? ''}</td>
+        <td>${s.schoolName ?? ''}</td>
+        <td>${s.lastName ?? ''}</td>
+        <td>${s.firstName ?? ''}</td>
+        <td>${s.studentId ?? ''}</td>
+        <td>${s.gradeLevel ?? ''}</td>
+      </tr>`).join('');
+  }
+
+  // Upgrade button style - show warning when near/over limit
+  const over = state.students.length >= plan.students;
+  const btn = $('upgradeBtn');
+  btn.textContent = over ? '⚠ Limit reached — Upgrade' : '⬆ Upgrade Plan';
+  btn.classList.toggle('danger', over);
+}
+
+/* ============================
+   Logo upload
+============================ */
+$('logoInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    $('logoCircle').innerHTML = `<img src="${ev.target.result}" alt="logo" />`;
+  };
+  reader.readAsDataURL(file);
+});
+
+/* ============================
+   Download demo Excel
+============================ */
+$('downloadDemoBtn').addEventListener('click', ()=>{
+  const sample = [
+    ['School ID','School Name','Last Name','First Name','Student ID','Grade Level'],
+    [1,'Cambridge School','Bing','Chandler',123,'JHS 3'],
+    [1,'Cambridge School','Green','Rachel',124,'JHS 2'],
+    [1,'Cambridge School','Tribbiani','Joey',125,'JHS 3'],
+    [1,'Cambridge School','Geller','Ross',126,'SHS 1'],
+    [1,'Cambridge School','Buffay','Phoebe',127,'JHS 1'],
+    [1,'Cambridge School','Geller','Monica',128,'SHS 2'],
+    [1,'Cambridge School','Gunther','Central',129,'JHS 2'],
+    [1,'Cambridge School','Hannigan','Janice',130,'SHS 1'],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(sample);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Students');
+  XLSX.writeFile(wb, 'students_demo.xlsx');
+  toast('Demo Excel downloaded', 'success');
+});
+
+/* ============================
+   Upload Excel
+============================ */
+$('uploadBtn').addEventListener('click', ()=>{
+  const plan = currentPlan();
+  if (state.students.length >= plan.students) {
+    toast('You have reached your plan limit. Upgrade to add more students.', 'warn');
+    openUpgrade();
+    return;
+  }
+  $('uploadInput').click();
+});
+
+$('uploadInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = new Uint8Array(ev.target.result);
+      const wb = XLSX.read(data, { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+      const mapped = rows.map(r => ({
+        schoolId:   r['School ID']   ?? r.schoolId   ?? '',
+        schoolName: r['School Name'] ?? r.schoolName ?? '',
+        lastName:   r['Last Name']   ?? r.lastName   ?? '',
+        firstName:  r['First Name']  ?? r.firstName  ?? '',
+        studentId:  r['Student ID']  ?? r.studentId  ?? '',
+        gradeLevel: r['Grade Level'] ?? r.gradeLevel ?? '',
+      }));
+
+      const plan = currentPlan();
+      const remaining = plan.students - state.students.length;
+      if (mapped.length > remaining) {
+        const toAdd = mapped.slice(0, remaining);
+        state.students = state.students.concat(toAdd);
+        toast(`Only ${remaining} slots left. Added ${toAdd.length}, remaining ${mapped.length - toAdd.length} need an upgrade.`, 'warn');
+        render();
+        openUpgrade();
+      } else {
+        state.students = state.students.concat(mapped);
+        toast(`${mapped.length} students added`, 'success');
+        render();
+      }
+    } catch(err){
+      console.error(err);
+      toast('Failed to read file. Use the demo format.', 'error');
+    }
+    e.target.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+/* ============================
+   Upgrade / Subscription flow
+============================ */
+function renderPlans() {
+  const plan = currentPlan();
+  $('plansContainer').innerHTML = PLANS.map(p=>{
+    const isCurrent = p.id === state.currentPlanId;
+    const tooSmall  = p.students < state.students.length;
+    const badge = isCurrent ? '✓ Current' : (tooSmall ? 'Too small' : '');
+    return `
+      <div class="plan-card ${state.selectedPlanId===p.id?'selected':''}" data-id="${p.id}" style="${tooSmall?'opacity:.5;pointer-events:none':''}">
+        <div class="name">${p.name} ${badge?`<small style="color:var(--muted);font-weight:500">· ${badge}</small>`:''}</div>
+        <div class="price">$${p.price}<small style="font-size:12px;color:var(--muted)">/yr</small></div>
+        <div class="students">Up to ${p.students} students</div>
+      </div>`;
+  }).join('');
+  document.querySelectorAll('.plan-card').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.selectedPlanId = el.dataset.id;
+      renderPlans();
+    });
+  });
+}
+function openUpgrade(){
+  state.selectedPlanId = state.currentPlanId;
+  renderPlans();
+  $('upgradeModal').classList.add('open');
+}
+function closeUpgrade(){ $('upgradeModal').classList.remove('open'); }
+
+$('upgradeBtn').addEventListener('click', openUpgrade);
+$('cancelUpgrade').addEventListener('click', closeUpgrade);
+$('confirmUpgrade').addEventListener('click', ()=>{
+  const picked = PLANS.find(p=>p.id===state.selectedPlanId);
+  if (!picked) { toast('Please select a plan', 'warn'); return; }
+  if (picked.students < state.students.length) {
+    toast('Selected plan cannot hold your current students.', 'error');
+    return;
+  }
+  // Treat every confirmation as a NEW subscription (resubscribe requirement)
+  state.currentPlanId = picked.id;
+  state.paidCount = picked.students; // "Total Paid" = paid capacity
+  // Extend expiry by 1 year from today
+  const d = new Date(); d.setFullYear(d.getFullYear()+1);
+  state.expiry = d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});
+  $('expiryDate').textContent = state.expiry;
+  closeUpgrade();
+  toast(`Subscribed to ${picked.name} — $${picked.price}/yr`, 'success');
+  render();
+});
+
+/* ============================
+   Init
+============================ */
+state.paidCount = currentPlan().students; // school has already paid for starter capacity
+render();
+</script>
+</body>
+</html>

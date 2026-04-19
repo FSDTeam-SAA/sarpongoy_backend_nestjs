@@ -10,23 +10,16 @@ import paginationHelper, { IOptions } from 'src/app/helpers/pagenation';
 import buildWhereConditions from 'src/app/helpers/buildWhereConditions';
 import sendMailer from 'src/app/helpers/sendMailer';
 import { generateWelcomeEmail } from 'src/app/utils/generateWelcomeEmail';
+import { School, SchoolDocument } from '../school/entities/school.entity';
 
-const userSearchAbleFields = [
-  'fullName',
-  'email',
-  'role',
-  'gender',
-  'phoneNumber',
-  'country',
-  'city',
-  'address',
-  'status',
-];
+const userSearchAbleFields = ['email', 'role', 'phoneNumber', 'firstName', 'lastName'];
 
 @Injectable()
 export class UserService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(School.name)
+    private readonly schoolModel: Model<SchoolDocument>,
   ) {}
 
   async createUser(
@@ -70,21 +63,44 @@ export class UserService {
 
   async getAllUser(params: IFilterParams, options: IOptions) {
     const { limit, page, skip, sortBy, sortOrder } = paginationHelper(options);
-    const whereConditions = buildWhereConditions(params, userSearchAbleFields);
+    const { searchTerm, schoolName, ...rest } = params;
+
+    const whereConditions: any = buildWhereConditions(
+      { searchTerm, ...rest },
+      userSearchAbleFields,
+    );
+
+    if (schoolName) {
+      const schools = await this.schoolModel
+        .find({ name: { $regex: schoolName, $options: 'i' } })
+        .select('_id');
+
+      whereConditions.schoolName = { $in: schools.map((s) => s._id) };
+    }
+
+    if (searchTerm) {
+      const schools = await this.schoolModel
+        .find({ name: { $regex: searchTerm, $options: 'i' } })
+        .select('_id');
+
+      if (schools.length) {
+        whereConditions.$or = whereConditions.$or || [];
+        whereConditions.$or.push({
+          schoolName: { $in: schools.map((s) => s._id) },
+        });
+      }
+    }
 
     const total = await this.userModel.countDocuments(whereConditions);
     const users = await this.userModel
       .find(whereConditions)
       .skip(skip)
       .limit(limit)
-      .sort({ [sortBy]: sortOrder } as any);
+      .sort({ [sortBy]: sortOrder } as any)
+      .populate('schoolName');
 
     return {
-      meta: {
-        page,
-        limit,
-        total,
-      },
+      meta: { page, limit, total },
       data: users,
     };
   }

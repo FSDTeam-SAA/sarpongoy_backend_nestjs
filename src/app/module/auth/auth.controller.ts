@@ -6,7 +6,9 @@ import {
   Post,
   Req,
   Res,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import {
@@ -18,17 +20,42 @@ import {
   VerifyEmailDto,
 } from './dto/create-auth.dto';
 import type { Request, Response } from 'express';
-import { ApiBearerAuth, ApiBody, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+} from '@nestjs/swagger';
 import AuthGuard from 'src/app/middlewares/auth.guard';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @ApiOperation({
+    summary: 'create user',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'schoolLogo', maxCount: 1 },
+      { name: 'uploadeSignature', maxCount: 1 },
+      { name: 'profilePicture', maxCount: 1 },
+    ]),
+  )
   @HttpCode(HttpStatus.CREATED)
-  async register(@Body() CreateAuthDto: CreateAuthDto) {
-    const result = await this.authService.register(CreateAuthDto);
+  async register(
+    @Body() CreateAuthDto: CreateAuthDto,
+    @UploadedFiles()
+    files: {
+      schoolLogo?: Express.Multer.File[];
+      uploadeSignature?: Express.Multer.File[];
+      profilePicture?: Express.Multer.File[];
+    },
+  ) {
+    const result = await this.authService.register(CreateAuthDto, files);
 
     return {
       message: 'User registered successfully',

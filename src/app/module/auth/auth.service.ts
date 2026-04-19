@@ -8,20 +8,53 @@ import * as bcrypt from 'bcrypt';
 import * as jwt from '@nestjs/jwt';
 import config from '../../config';
 import sendMailer from 'src/app/helpers/sendMailer';
+import { fileUpload } from 'src/app/helpers/fileUploder';
+import { School, SchoolDocument } from '../school/entities/school.entity';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(School.name)
+    private readonly schoolModel: Model<SchoolDocument>,
     private readonly jwtService: jwt.JwtService,
   ) {}
 
-  async register(CreateAuthDto: CreateAuthDto) {
+  async register(
+    CreateAuthDto: CreateAuthDto,
+    files?: {
+      schoolLogo?: Express.Multer.File[];
+      uploadeSignature?: Express.Multer.File[];
+      profilePicture?: Express.Multer.File[];
+    },
+  ) {
     const user = await this.userModel.findOne({ email: CreateAuthDto.email });
     if (user) {
       throw new HttpException('User already exists', 400);
     }
+    if (files?.schoolLogo?.length) {
+      const uploadedFile = await fileUpload.uploadToCloudinary(
+        files.schoolLogo[0],
+      );
+      CreateAuthDto.schoolLogo = uploadedFile.url;
+    }
+    if (files?.uploadeSignature?.length) {
+      const uploadedFile = await fileUpload.uploadToCloudinary(
+        files.uploadeSignature[0],
+      );
+      CreateAuthDto.uploadeSignature = uploadedFile.url;
+    }
+    if (files?.profilePicture?.length) {
+      const uploadedFile = await fileUpload.uploadToCloudinary(
+        files.profilePicture[0],
+      );
+      CreateAuthDto.profilePicture = uploadedFile.url;
+    }
     const newUser = await this.userModel.create(CreateAuthDto);
+    await this.schoolModel.findOneAndUpdate(
+      { _id: CreateAuthDto.schoolName },
+      { $push: { school: newUser._id } },
+    );
     return newUser;
   }
 
