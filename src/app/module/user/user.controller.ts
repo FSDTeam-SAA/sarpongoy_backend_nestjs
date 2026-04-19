@@ -30,7 +30,7 @@ import type { Request } from 'express';
 import pick from 'src/app/helpers/pick';
 import { UserRole } from './user-role.enum';
 
-@ApiTags('User')
+@ApiTags('User(School/Admin)')
 @Controller('user')
 export class UserController {
   constructor(private readonly userService: UserService) {}
