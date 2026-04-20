@@ -1,4 +1,3 @@
-// payment/entities/payment.entity.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument, Types } from 'mongoose';
 
@@ -8,13 +7,20 @@ export type PaymentDocument = HydratedDocument<Payment>;
 export class Payment {
   @Prop({
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Booking',
+    ref: 'User',
     required: true,
   })
-  bookingId: Types.ObjectId;
+  userId: Types.ObjectId;
+
+  @Prop({
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Subscribe',
+    required: true,
+  })
+  subscribeId: Types.ObjectId;
 
   @Prop()
-  name: string;
+  schoolName: string;
 
   @Prop()
   email: string;

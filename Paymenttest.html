@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Subscription Payment</title>
+  <script src="https://js.stripe.com/v3/"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f6f9fc;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .checkout-wrapper {
+      display: flex;
+      width: 900px;
+      min-height: 560px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.12);
+      overflow: hidden;
+    }
+    /* LEFT */
+    .left-panel {
+      width: 380px;
+      background: #f6f9fc;
+      padding: 48px 40px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #e6ebf1;
+    }
+    .brand {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b7c93;
+      letter-spacing: 0.5px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-badge {
+      background: #f6a609;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    .pay-label { font-size: 14px; color: #6b7c93; margin-bottom: 6px; }
+    .pay-amount { font-size: 40px; font-weight: 700; color: #1a1f36; margin-bottom: 32px; }
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid #e6ebf1;
+    }
+    .item-icon {
+      width: 44px; height: 44px;
+      background: #e8edf3;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    .item-info { flex: 1; }
+    .item-name { font-size: 14px; font-weight: 600; color: #1a1f36; }
+    .item-sub  { font-size: 12px; color: #8898aa; margin-top: 2px; }
+    .item-price{ font-size: 14px; font-weight: 600; color: #1a1f36; }
+    .subtotal-row {
+      display: flex; justify-content: space-between;
+      padding: 12px 0 4px; font-size: 13px; color: #6b7c93;
+    }
+    .total-row {
+      display: flex; justify-content: space-between;
+      padding: 10px 0 0; font-size: 15px; font-weight: 700; color: #1a1f36;
+    }
+    .powered { margin-top: 28px; font-size: 12px; color: #aab7c4; display: flex; align-items: center; gap: 6px; }
+
+    /* RIGHT */
+    .right-panel { flex: 1; padding: 48px 40px; display: flex; flex-direction: column; }
+    .right-panel h3 { font-size: 18px; font-weight: 700; color: #1a1f36; margin-bottom: 24px; }
+
+    .config-toggle {
+      font-size: 12px; color: #556cd6; cursor: pointer;
+      margin-bottom: 18px; display: inline-flex; align-items: center; gap: 4px; user-select: none;
+    }
+    .config-section { display: none; margin-bottom: 4px; }
+    .config-section.open { display: block; }
+
+    label {
+      display: block; font-size: 11px; font-weight: 600;
+      color: #6b7c93; margin-bottom: 5px; letter-spacing: 0.4px; text-transform: uppercase;
+    }
+    input[type="text"], select {
+      width: 100%; padding: 10px 13px;
+      border: 1.5px solid #e6ebf1; border-radius: 6px;
+      font-size: 14px; color: #1a1f36; outline: none;
+      transition: border 0.15s, box-shadow 0.15s; margin-bottom: 14px; background: #fff;
+    }
+    input[type="text"]:focus, select:focus {
+      border-color: #556cd6; box-shadow: 0 0 0 3px rgba(85,108,214,0.12);
+    }
+    .card-field-wrapper {
+      border: 1.5px solid #e6ebf1; border-radius: 6px;
+      overflow: hidden; margin-bottom: 8px;
+      transition: border 0.15s, box-shadow 0.15s;
+    }
+    .card-field-wrapper:focus-within {
+      border-color: #556cd6; box-shadow: 0 0 0 3px rgba(85,108,214,0.12);
+    }
+    #card-element { padding: 12px 13px; background: #fff; }
+    #card-errors { color: #e25950; font-size: 12px; min-height: 18px; margin-bottom: 14px; }
+
+    #payBtn {
+      width: 100%; padding: 13px;
+      background: #556cd6; color: #fff;
+      font-size: 15px; font-weight: 600;
+      border: none; border-radius: 6px; cursor: pointer;
+      transition: background 0.2s, transform 0.1s; letter-spacing: 0.2px;
+    }
+    #payBtn:hover { background: #4a5fc4; }
+    #payBtn:active { transform: scale(0.99); }
+    #payBtn:disabled { background: #aab7c4; cursor: not-allowed; }
+
+    #status-box {
+      display: none; margin-top: 16px; border-radius: 6px;
+      padding: 12px 14px; font-size: 13px; font-weight: 500;
+    }
+    #status-box.success { background: #f0fdf4; border: 1.5px solid #86efac; color: #166534; }
+    #status-box.error   { background: #fff5f5; border: 1.5px solid #feb2b2; color: #c53030; }
+    #status-box.loading { background: #ebf4ff; border: 1.5px solid #90cdf4; color: #2b6cb0; }
+    .spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid #90cdf4; border-top-color: #2563eb;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+      margin-right: 7px; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .test-hint { font-size: 11px; color: #aab7c4; margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .test-hint code {
+      background: #f6f9fc; border: 1px solid #e6ebf1;
+      border-radius: 3px; padding: 1px 5px; font-size: 11px;
+      cursor: pointer; letter-spacing: 0.5px; color: #556cd6;
+    }
+    .two-col { display: flex; gap: 14px; }
+    .two-col > div { flex: 1; }
+
+    @media (max-width: 700px) {
+      .checkout-wrapper { flex-direction: column; width: 100%; border-radius: 0; min-height: unset; }
+      .left-panel { width: 100%; border-right: none; border-bottom: 1px solid #e6ebf1; padding: 28px 20px; }
+      .right-panel { padding: 28px 20px; }
+      .pay-amount { font-size: 30px; }
+    }
+  </style>
+</head>
+<body>
+<div class="checkout-wrapper">
+
+  <!-- LEFT: Summary -->
+  <div class="left-panel">
+    <div class="brand">Sarpongoy <span class="brand-badge">TEST MODE</span></div>
+    <div class="pay-label">Subscribe to</div>
+    <div class="pay-amount" id="leftAmount">£0.00</div>
+
+    <div class="item">
+      <div class="item-icon">📦</div>
+      <div class="item-info">
+        <div class="item-name" id="planName">—</div>
+        <div class="item-sub" id="planMonths">—</div>
+      </div>
+      <div class="item-price" id="planPrice">£0.00</div>
+    </div>
+
+    <div class="subtotal-row"><span>Subtotal</span><span id="subtotalAmt">£0.00</span></div>
+    <div class="total-row"><span>Total due today</span><span id="totalAmt">£0.00</span></div>
+
+    <div class="powered">
+      <svg width="38" height="16" viewBox="0 0 60 25"><rect width="60" height="25" rx="4" fill="#6772e5"/><text x="8" y="17" font-family="Arial" font-size="11" font-weight="bold" fill="white">stripe</text></svg>
+      Powered by Stripe
+    </div>
+  </div>
+
+  <!-- RIGHT: Form -->
+  <div class="right-panel">
+    <h3>Pay with card</h3>
+
+    <span class="config-toggle" onclick="toggleConfig()">⚙️ <span id="toggleText">Show API config</span></span>
+
+    <div class="config-section" id="configSection">
+      <label>Backend Base URL</label>
+      <input type="text" id="baseUrl" value="http://localhost:5000/api/v1"/>
+
+      <label>Stripe Publishable Key</label>
+      <input type="text" id="stripeKey" placeholder="pk_test_..." onblur="initStripe()"/>
+
+      <label>Bearer Token (JWT)</label>
+      <input type="text" id="token" placeholder="eyJhbGci..."/>
+
+      <label>Subscribe ID</label>
+      <input type="text" id="subscribeId" placeholder="64f1a2b3c4d5e6f7a8b9c0d1"/>
+    </div>
+
+    <!-- Test card hints -->
+    <div class="test-hint">
+      Test:
+      <code onclick="copyCard(this)">4242 4242 4242 4242</code>
+      <code onclick="copyCard(this)">4000 0000 0000 0002</code>
+      <code onclick="copyCard(this)">4000 0025 0000 3155</code>
+      · Any future date · Any CVC
+    </div>
+
+    <label>Card Information</label>
+    <div class="card-field-wrapper"><div id="card-element"></div></div>
+    <div id="card-errors"></div>
+
+    <div class="two-col">
+      <div>
+        <label>Name on card</label>
+        <input type="text" id="cardName" placeholder="Full name"/>
+      </div>
+      <div>
+        <label>Country</label>
+        <select id="country">
+          <option value="GB">United Kingdom</option>
+          <option value="US">United States</option>
+          <option value="BD">Bangladesh</option>
+          <option value="AE">United Arab Emirates</option>
+          <option value="AU">Australia</option>
+          <option value="CA">Canada</option>
+          <option value="IN">India</option>
+          <option value="SG">Singapore</option>
+        </select>
+      </div>
+    </div>
+
+    <button id="payBtn" onclick="handlePay()">Pay £0.00</button>
+    <div id="status-box"></div>
+  </div>
+</div>
+
+<script>
+  let stripe = null, cardElement = null;
+
+  function toggleConfig() {
+    const s = document.getElementById('configSection');
+    s.classList.toggle('open');
+    document.getElementById('toggleText').textContent =
+      s.classList.contains('open') ? 'Hide API config' : 'Show API config';
+  }
+
+  // Auto-open config on load
+  window.addEventListener('load', () => toggleConfig());
+
+  function initStripe() {
+    const key = document.getElementById('stripeKey').value.trim();
+    if (!key.startsWith('pk_')) return;
+    stripe = Stripe(key);
+    const els = stripe.elements({ locale: 'en' });
+    if (cardElement) { cardElement.destroy(); cardElement = null; }
+    cardElement = els.create('card', {
+      hidePostalCode: true,
+      style: {
+        base: {
+          fontSize: '15px', color: '#1a1f36',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          '::placeholder': { color: '#aab7c4' },
+        },
+        invalid: { color: '#e25950' },
+      },
+    });
+    cardElement.mount('#card-element');
+    cardElement.on('change', e => {
+      document.getElementById('card-errors').textContent = e.error ? e.error.message : '';
+    });
+  }
+
+  function setAmount(amount) {
+    const fmt = `£${Number(amount).toFixed(2)}`;
+    ['leftAmount','planPrice','subtotalAmt','totalAmt'].forEach(id => {
+      document.getElementById(id).textContent = fmt;
+    });
+    document.getElementById('payBtn').textContent = `Pay ${fmt}`;
+  }
+
+  async function handlePay() {
+    const baseUrl     = document.getElementById('baseUrl').value.trim();
+    const token       = document.getElementById('token').value.trim();
+    const subscribeId = document.getElementById('subscribeId').value.trim();
+    const cardName    = document.getElementById('cardName').value.trim();
+
+    if (!stripe || !cardElement) return showStatus('error', '⚠️ Enter Stripe Publishable Key and click outside the field.');
+    if (!token)       return showStatus('error', '⚠️ Bearer token is required.');
+    if (!subscribeId) return showStatus('error', '⚠️ Subscribe ID is required.');
+
+    setLoading(true);
+    showStatus('loading', '<span class="spinner"></span> Creating payment intent...');
+
+    try {
+      const res = await fetch(`${baseUrl}/payment/${subscribeId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || `Server error ${res.status}`);
+
+      const { clientSecret, amount } = json.data;
+      setAmount(amount);
+      document.getElementById('planName').textContent = 'Subscription Plan';
+      document.getElementById('planMonths').textContent = 'Monthly access';
+
+      showStatus('loading', '<span class="spinner"></span> Confirming payment with Stripe...');
+
+      const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: cardElement,
+          billing_details: {
+            name: cardName || undefined,
+            address: { country: document.getElementById('country').value },
+          },
+        },
+      });
+
+      if (error) throw new Error(error.message);
+
+      if (paymentIntent.status === 'succeeded') {
+        showStatus('success', `✅ Payment successful!<br/>Intent ID: <strong>${paymentIntent.id}</strong>`);
+        const btn = document.getElementById('payBtn');
+        btn.textContent = '✅ Payment Successful';
+        btn.disabled = true;
+      } else {
+        showStatus('loading', `ℹ️ Status: <strong>${paymentIntent.status}</strong>`);
+        setLoading(false);
+      }
+    } catch (err) {
+      showStatus('error', `❌ ${err.message}`);
+      setLoading(false);
+    }
+  }
+
+  function showStatus(type, html) {
+    const box = document.getElementById('status-box');
+    box.className = type; box.innerHTML = html; box.style.display = 'block';
+  }
+
+  function setLoading(on) {
+    const btn = document.getElementById('payBtn');
+    btn.disabled = on;
+    if (on) btn.textContent = 'Processing...';
+  }
+
+  function copyCard(el) {
+    navigator.clipboard.writeText(el.textContent.replace(/\s/g, ''));
+    const orig = el.textContent;
+    el.textContent = 'Copied!';
+    setTimeout(() => el.textContent = orig, 1000);
+  }
+</script>
+</body>
+</html>

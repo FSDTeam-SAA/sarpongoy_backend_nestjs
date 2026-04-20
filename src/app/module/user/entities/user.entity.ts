@@ -41,6 +41,9 @@ export class User {
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Subscription' })
   subscription: Types.ObjectId;
 
+  @Prop({ type: Date })
+  subscriptionExpiry: Date;
+
   @Prop() bio: string;
   @Prop() totalStudent: number;
 
@@ -52,6 +55,9 @@ export class User {
 
   @Prop({ default: false })
   verifiedForget: boolean;
+
+  @Prop({ type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Exclesheet' }], default: [] })
+  studentList: Types.ObjectId[];
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

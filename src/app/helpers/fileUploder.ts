@@ -25,21 +25,32 @@ const uploadToCloudinary = async (
     throw new HttpException('No valid file provided', 400);
   }
 
-  if (file.mimetype && !file.mimetype.startsWith('image/')) {
-    throw new HttpException('Only image files are allowed', 400);
+  const isImage = file.mimetype && file.mimetype.startsWith('image/');
+  const isExcel =
+    file.mimetype === 'application/vnd.ms-excel' ||
+    file.mimetype ===
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  if (!isImage && !isExcel) {
+    throw new HttpException('Only image and Excel files are allowed', 400);
+  }
+
+  const uploadOptions: any = {
+    folder: 'healthcare_app',
+    resource_type: isImage ? 'image' : 'raw',
+  };
+
+  if (isImage) {
+    uploadOptions.transformation = {
+      width: 500,
+      height: 500,
+      crop: 'limit',
+    };
   }
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: 'healthcare_app',
-        resource_type: 'image',
-        transformation: {
-          width: 500,
-          height: 500,
-          crop: 'limit',
-        },
-      },
+      uploadOptions,
       (error, result) => {
         if (error) return reject(error);
 
