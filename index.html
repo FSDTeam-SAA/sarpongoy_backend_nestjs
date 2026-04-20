@@ -423,15 +423,15 @@ $('logoInput').addEventListener('change', (e)=>{
 ============================ */
 $('downloadDemoBtn').addEventListener('click', ()=>{
   const sample = [
-    ['School ID','School Name','Last Name','First Name','Student ID','Grade Level'],
-    [1,'Cambridge School','Bing','Chandler',123,'JHS 3'],
-    [1,'Cambridge School','Green','Rachel',124,'JHS 2'],
-    [1,'Cambridge School','Tribbiani','Joey',125,'JHS 3'],
-    [1,'Cambridge School','Geller','Ross',126,'SHS 1'],
-    [1,'Cambridge School','Buffay','Phoebe',127,'JHS 1'],
-    [1,'Cambridge School','Geller','Monica',128,'SHS 2'],
-    [1,'Cambridge School','Gunther','Central',129,'JHS 2'],
-    [1,'Cambridge School','Hannigan','Janice',130,'SHS 1'],
+    ['School Name','Last Name','First Name','Student ID','Grade Level'],
+    ['Cambridge School','Bing','Chandler',123,'JHS 3'],
+    ['Cambridge School','Green','Rachel',124,'JHS 2'],
+    ['Cambridge School','Tribbiani','Joey',125,'JHS 3'],
+    ['Cambridge School','Geller','Ross',126,'SHS 1'],
+    ['Cambridge School','Buffay','Phoebe',127,'JHS 1'],
+    ['Cambridge School','Geller','Monica',128,'SHS 2'],
+    ['Cambridge School','Gunther','Central',129,'JHS 2'],
+    ['Cambridge School','Hannigan','Janice',130,'SHS 1'],
   ];
   const ws = XLSX.utils.aoa_to_sheet(sample);
   const wb = XLSX.utils.book_new();
