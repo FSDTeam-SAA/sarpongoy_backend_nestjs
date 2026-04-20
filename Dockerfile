@@ -1,30 +1,51 @@
-# ─────────────────────────────────────────────
-# Stage 1: Build
-# ─────────────────────────────────────────────
-FROM node:22-alpine AS builder
+#-------------------- development -----------------------
+FROM node:25-alpine AS development
 
-WORKDIR /usr/src/app
+WORKDIR /app
 
+# Copy package files
 COPY package*.json ./
-RUN npm install
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
 
+# Install dependencies
+RUN npm ci
+
+# Copy source code
 COPY . .
 
-RUN npm run build
+EXPOSE 5000
 
-# ─────────────────────────────────────────────
-# Stage 2: Production
-# ─────────────────────────────────────────────
-FROM node:22-alpine AS production
+CMD ["npm", "run", "start:dev"]
 
-WORKDIR /usr/src/app
 
-ENV NODE_ENV=production
+#-------------------- build -----------------------
+FROM node:25-alpine AS build
+
+WORKDIR /app
 
 COPY package*.json ./
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
+
+RUN npm ci
+
+COPY . . 
+
+RUN npm run build
+RUN npm prune --production
+
+
+#-------------------- production -----------------------
+FROM node:25-alpine AS production
+
+WORKDIR /app
+
+COPY package*.json ./
+
 RUN npm install --omit=dev
 
-COPY --from=builder /usr/src/app/dist ./dist
+COPY --from=build /app/dist ./dist
 
 EXPOSE 5000
 
