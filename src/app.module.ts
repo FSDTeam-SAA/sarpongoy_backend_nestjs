@@ -13,6 +13,7 @@ import { SubscribeModule } from './app/module/subscribe/subscribe.module';
 import { SchoolModule } from './app/module/school/school.module';
 import { ContactModule } from './app/module/contact/contact.module';
 import { ExclesheetModule } from './app/module/exclesheet/exclesheet.module';
+import { DashboardModule } from './app/module/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { ExclesheetModule } from './app/module/exclesheet/exclesheet.module';
     SchoolModule,
     ContactModule,
     ExclesheetModule,
+    DashboardModule,
   ],
 
   controllers: [AppController],
