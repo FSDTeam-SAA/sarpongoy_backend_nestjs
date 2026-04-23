@@ -160,7 +160,7 @@ export class UserController {
     summary: 'Get the profile of the currently authenticated user',
   })
   @ApiBearerAuth('access-token')
-  @UseGuards(AuthGuard('admin', 'user'))
+  @UseGuards(AuthGuard('admin', 'school'))
   @HttpCode(HttpStatus.OK)
   async getProfile(@Req() req: Request) {
     const user = await this.userService.getProfile(req.user!.id);
