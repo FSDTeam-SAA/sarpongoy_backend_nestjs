@@ -6,9 +6,10 @@ coverage
 .git
 .gitignore
 
-# .env
-# .env.*
-# !.env.example
+# .env কখনো image এ নেবে না!
+.env
+.env.*
+!.env.example
 
 .vscode
 .idea

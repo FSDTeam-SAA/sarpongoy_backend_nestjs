@@ -1,52 +1,50 @@
-#-------------------- development -----------------------
-FROM node:25-alpine AS development
+# ============================================================
+# Stage 1: Builder — TypeScript build করার জন্য
+# ============================================================
+FROM node:20-alpine AS builder
 
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Copy package files
+# আগে package files কপি করো (Docker cache এর জন্য)
+# code না বদলালে npm ci আবার run হবে না — build faster হবে
 COPY package*.json ./
-COPY tsconfig*.json ./
-COPY nest-cli.json ./
 
-# Install dependencies
+# সব dependency install (dev সহ — build এর জন্য লাগবে)
 RUN npm ci
 
-# Copy source code
+# Source code কপি করো
 COPY . .
 
-EXPOSE 5000
-
-CMD ["npm", "run", "start:dev"]
-
-
-#-------------------- build -----------------------
-FROM node:25-alpine AS build
-
-WORKDIR /app
-
-COPY package*.json ./
-COPY tsconfig*.json ./
-COPY nest-cli.json ./
-
-RUN npm ci
-
-COPY . . 
-
+# TypeScript → JavaScript build
 RUN npm run build
-RUN npm prune --production
 
+# ============================================================
+# Stage 2: Production — ছোট, fast, secure image
+# ============================================================
+FROM node:20-alpine AS production
 
-#-------------------- production -----------------------
-FROM node:25-alpine AS production
+WORKDIR /usr/src/app
 
-WORKDIR /app
+# Production environment
+ENV NODE_ENV=production
 
 COPY package*.json ./
 
-RUN npm install --omit=dev
+# শুধু production dependency install করো (dev packages বাদ)
+# এতে image size অনেক ছোট হয়
+RUN npm ci --only=production && npm cache clean --force
 
-COPY --from=build /app/dist ./dist
+# Builder stage থেকে compiled JavaScript কপি করো
+COPY --from=builder /usr/src/app/dist ./dist
 
+# Security: root user এর বদলে non-root user
+# Container hack হলেও server এর root access পাবে না
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001
+USER nestjs
+
+# App কোন port এ চলবে
 EXPOSE 5000
 
-CMD ["node", "dist/main.js"]
+# Container চালু হলে app start হবে
+CMD ["node", "dist/src/main"]
