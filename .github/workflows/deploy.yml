@@ -12,13 +12,13 @@ jobs:
     steps:
 
       # ─────────────────────────────────────────
-      # 1. Code নামাও
+      # 1. Code checkout
       # ─────────────────────────────────────────
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
       # ─────────────────────────────────────────
-      # 2. Node.js setup
+      # 2. Node.js setup (cache for speed)
       # ─────────────────────────────────────────
       - name: ⚙️ Setup Node.js
         uses: actions/setup-node@v4
@@ -27,7 +27,7 @@ jobs:
           cache: 'npm'
 
       # ─────────────────────────────────────────
-      # 3. Install + Build (check করার জন্য)
+      # 3. Install & Build (TypeScript check)
       # ─────────────────────────────────────────
       - name: 📦 Install & Build
         run: |
@@ -35,7 +35,7 @@ jobs:
           npm run build
 
       # ─────────────────────────────────────────
-      # 4. Docker Hub এ login করো
+      # 4. Docker Hub login
       # ─────────────────────────────────────────
       - name: 🐳 Login to Docker Hub
         uses: docker/login-action@v3
@@ -44,7 +44,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # ─────────────────────────────────────────
-      # 5. Docker image build করো + Hub এ push করো
+      # 5. Build & Push Docker image
       # ─────────────────────────────────────────
       - name: 🔨 Build & Push Docker Image
         uses: docker/build-push-action@v5
@@ -57,7 +57,7 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/sarpongoy-backend:${{ github.sha }}
 
       # ─────────────────────────────────────────
-      # 6. VPS তে SSH করে deploy করো
+      # 6. Deploy to VPS via SSH (password auth)
       # ─────────────────────────────────────────
       - name: 🖥️ Deploy to VPS
         uses: appleboy/ssh-action@v1
@@ -66,16 +66,15 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
-
             echo "=============================="
             echo "🚀 Deploy শুরু হচ্ছে..."
             echo "=============================="
 
-            # App folder তৈরি করো
-            mkdir -p /app/nginx/ssl
+            # App folder তৈরি
+            mkdir -p /app
 
             # ─────────────────────────
-            # .env ফাইল তৈরি করো
+            # .env ফাইল তৈরি
             # ─────────────────────────
             cat > /app/.env << 'ENVEOF'
             NODE_ENV=production
@@ -109,73 +108,16 @@ jobs:
             ENVEOF
 
             # ─────────────────────────
-            # Nginx config তৈরি করো
-            # ─────────────────────────
-            cat > /app/nginx/default.conf << 'NGINXEOF'
-            limit_req_zone $binary_remote_addr zone=api:10m rate=30r/m;
-
-            server {
-                listen 80;
-                server_name _;
-
-                add_header X-Frame-Options "SAMEORIGIN" always;
-                add_header X-Content-Type-Options "nosniff" always;
-                add_header X-XSS-Protection "1; mode=block" always;
-
-                client_max_body_size 100M;
-
-                location / {
-                    limit_req zone=api burst=20 nodelay;
-                    proxy_pass http://app:5000;
-                    proxy_http_version 1.1;
-                    proxy_set_header Upgrade $http_upgrade;
-                    proxy_set_header Connection 'upgrade';
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
-                    proxy_cache_bypass $http_upgrade;
-                    proxy_connect_timeout 60s;
-                    proxy_send_timeout 60s;
-                    proxy_read_timeout 60s;
-                }
-
-                location /nginx-health {
-                    access_log off;
-                    return 200 "healthy\n";
-                    add_header Content-Type text/plain;
-                }
-            }
-            NGINXEOF
-
-            # ─────────────────────────
-            # docker-compose.yml তৈরি করো
+            # docker-compose.yml তৈরি
             # ─────────────────────────
             cat > /app/docker-compose.yml << 'COMPOSEEOF'
-            version: '3.9'
             services:
-              nginx:
-                image: nginx:alpine
-                container_name: sarpongoy_nginx
-                restart: unless-stopped
-                ports:
-                  - "80:80"
-                  - "443:443"
-                volumes:
-                  - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-                  - ./nginx/ssl:/etc/nginx/ssl:ro
-                  - nginx_logs:/var/log/nginx
-                depends_on:
-                  - app
-                networks:
-                  - backend_network
-
               app:
                 image: ${{ secrets.DOCKER_USERNAME }}/sarpongoy-backend:latest
                 container_name: sarpongoy_app
                 restart: unless-stopped
-                expose:
-                  - "5000"
+                ports:
+                  - "5000:5000"
                 env_file:
                   - .env
                 networks:
@@ -190,34 +132,46 @@ jobs:
             networks:
               backend_network:
                 driver: bridge
-
-            volumes:
-              nginx_logs:
             COMPOSEEOF
 
             # ─────────────────────────
-            # নতুন image pull করো
+            # PM2 web-backend বন্ধ করো
+            # (port 5000 conflict avoid করতে)
+            # ─────────────────────────
+            echo "⏹️ PM2 web-backend বন্ধ করছি..."
+            pm2 stop web-backend 2>/dev/null || true
+            pm2 delete web-backend 2>/dev/null || true
+
+            # ─────────────────────────
+            # Latest image pull
             # ─────────────────────────
             echo "📥 Latest image pull করছি..."
             docker pull ${{ secrets.DOCKER_USERNAME }}/sarpongoy-backend:latest
 
             # ─────────────────────────
-            # পুরনো containers বন্ধ করো
+            # পুরনো container বন্ধ
             # ─────────────────────────
             echo "⏹️ পুরনো containers বন্ধ করছি..."
             cd /app && docker compose down
 
             # ─────────────────────────
-            # নতুন containers চালু করো
+            # নতুন container চালু
             # ─────────────────────────
-            echo "▶️ নতুন containers চালু করছি..."
+            echo "▶️ নতুন container চালু করছি..."
             cd /app && docker compose up -d
 
             # ─────────────────────────
-            # পুরনো image মুছো
+            # পুরনো image পরিষ্কার
             # ─────────────────────────
             echo "🧹 পুরনো images মুছছি..."
             docker image prune -f
+
+            # ─────────────────────────
+            # Health check
+            # ─────────────────────────
+            echo "🔍 Health check..."
+            sleep 10
+            docker compose -f /app/docker-compose.yml ps
 
             echo "=============================="
             echo "✅ Deploy সফল হয়েছে!"
