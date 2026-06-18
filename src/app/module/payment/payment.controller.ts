@@ -45,6 +45,25 @@ export class PaymentController {
     };
   }
 
+  @Post('school/:schoolId')
+  @ApiOperation({ summary: 'Create payment intent for school subscription' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @HttpCode(HttpStatus.CREATED)
+  async paySubscribeSchool(
+    @Req() req: Request,
+    @Param('schoolId') schoolId: string,
+  ) {
+    const result = await this.paymentService.paySubscribeSchool(
+      req.user!.id,
+      schoolId,
+    );
+    return {
+      message: 'Payment intent created successfully',
+      data: result,
+    };
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get all payments' })
   @ApiBearerAuth('access-token')

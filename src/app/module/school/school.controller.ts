@@ -11,12 +11,15 @@ import {
   Patch,
   Delete,
   Put,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { SchoolService } from './school.service';
 import { CreateSchoolDto } from './dto/create-school.dto';
 import { UpdateSchoolDto } from './dto/update-school.dto';
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiOperation,
   ApiQuery,
   ApiTags,
@@ -25,6 +28,8 @@ import AuthGuard from 'src/app/middlewares/auth.guard';
 import { UserRole } from '../user/user-role.enum';
 import type { Request } from 'express';
 import pick from 'src/app/helpers/pick';
+import { AnyFilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
+import { fileUpload } from 'src/app/helpers/fileUploder';
 
 @ApiTags('School')
 @Controller('school')
@@ -37,10 +42,12 @@ export class SchoolController {
     description: 'Create a new school',
   })
   @ApiBearerAuth('access-token')
+  @ApiConsumes('multipart/form-data')
   @UseGuards(AuthGuard(UserRole.ADMIN))
+  @UseInterceptors(FileInterceptor('NDA', fileUpload.uploadConfig))
   @HttpCode(HttpStatus.CREATED)
-  async createSchool(@Body() createSchoolDto: CreateSchoolDto) {
-    const result = await this.schoolService.createSchool(createSchoolDto);
+  async createSchool(@Body() createSchoolDto: CreateSchoolDto, @UploadedFile() file?: Express.Multer.File) {
+    const result = await this.schoolService.createSchool(createSchoolDto, file);
     return {
       message: 'School created successfully',
       data: result,
@@ -90,13 +97,16 @@ export class SchoolController {
     description: 'Update a school',
   })
   @ApiBearerAuth('access-token')
+  @ApiConsumes('multipart/form-data')
   @UseGuards(AuthGuard(UserRole.ADMIN))
+  @UseInterceptors(FileInterceptor('NDA', fileUpload.uploadConfig))
   @HttpCode(HttpStatus.OK)
   async updateSchool(
     @Param('id') id: string,
     @Body() updateSchoolDto: UpdateSchoolDto,
+    @UploadedFile() file?: Express.Multer.File
   ) {
-    const result = await this.schoolService.updateSchool(id, updateSchoolDto);
+    const result = await this.schoolService.updateSchool(id, updateSchoolDto, file);
     return {
       message: 'School updated successfully',
       data: result,

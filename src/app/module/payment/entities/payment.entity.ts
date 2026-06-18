@@ -10,36 +10,41 @@ export class Payment {
     ref: 'User',
     required: true,
   })
-  userId: Types.ObjectId;
+  userId!: Types.ObjectId;
+
+  @Prop({
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'School',
+  })
+  schoolId!: Types.ObjectId;
 
   @Prop({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Subscribe',
-    required: true,
   })
-  subscribeId: Types.ObjectId;
+  subscribeId!: Types.ObjectId;
 
   @Prop()
-  schoolName: string;
+  schoolName!: string;
 
   @Prop()
-  email: string;
+  email!: string;
 
   @Prop()
-  amount: number;
+  amount!: number;
 
   @Prop({ default: 'booking' })
-  paymentType: string;
+  paymentType!: string;
 
   @Prop({
     type: String,
     enum: ['pending', 'completed', 'failed', 'refunded'],
     default: 'pending',
   })
-  status: string;
+  status!: string;
 
   @Prop()
-  stripePaymentIntentId: string;
+  stripePaymentIntentId!: string;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
