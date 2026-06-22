@@ -243,4 +243,21 @@ export class PaymentService {
     if (!payment) throw new HttpException('Payment not found', 404);
     return payment;
   }
+
+  async schoolPraymentSub(schoolId: string) {
+    const school = await this.schoolModel.findById(schoolId);
+    if (!school) throw new HttpException('School not found', 404);
+
+    const student = await this.userModel.findOne({ schoolName: school._id });
+    if (!student) throw new HttpException('User not found', 404);
+
+    const payment = await this.paymentModel.findOne({
+      userId: student._id,
+      schoolId: school._id,
+      status: 'completed',
+      paymentType: 'school',
+    });
+    if (!payment) throw new HttpException('Payment not found', 404);
+    
+  }
 }
