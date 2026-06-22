@@ -6,10 +6,16 @@ export type SchoolDocument = HydratedDocument<School>;
 @Schema({ timestamps: true })
 export class School {
   @Prop({ required: true })
-  name: string;
+  name!: string;
+
+  @Prop()
+  subscribePrice!: number;
+
+  @Prop()
+  NDA!: string;
 
   @Prop({ type: [mongoose.Schema.Types.ObjectId], ref: 'User' })
-  school: Types.ObjectId[];
+  school!: Types.ObjectId[];
 }
 
 export const SchoolSchema = SchemaFactory.createForClass(School);

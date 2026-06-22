@@ -10,6 +10,7 @@ import {
   SubscribeDocument,
 } from '../subscribe/entities/subscribe.entity';
 import { User, UserDocument } from '../user/entities/user.entity';
+import { School, SchoolDocument } from '../school/entities/school.entity';
 
 type StripeEvent = ReturnType<
   InstanceType<typeof Stripe>['webhooks']['constructEvent']
@@ -29,6 +30,8 @@ export class WebhookService {
     private readonly subscribeModel: Model<SubscribeDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    @InjectModel(School.name)
+    private readonly schoolModel: Model<SchoolDocument>,
   ) {}
 
   async handleWebhook(rawBody: Buffer, sig: string, res: Response) {
@@ -70,39 +73,97 @@ export class WebhookService {
     return res.json({ received: true });
   }
 
- private async handlePaymentIntentSucceeded(event: StripeEvent) {
-  const intent = event.data.object as any;
+  // private async handlePaymentIntentSucceeded(event: StripeEvent) {
+  //   const intent = event.data.object as any;
 
-  const payment = await this.paymentModel.findOne({
-    stripePaymentIntentId: intent.id,
-  });
-  if (!payment) return;
+  //   const payment = await this.paymentModel.findOne({
+  //     stripePaymentIntentId: intent.id,
+  //   });
+  //   if (!payment) return;
 
-  payment.status = 'completed';
-  await payment.save();
+  //   payment.status = 'completed';
+  //   await payment.save();
 
-  const subscribe = await this.subscribeModel.findById(payment.subscribeId);
-  if (!subscribe) return;
+  //   const subscribe = await this.subscribeModel.findById(payment.subscribeId);
+  //   if (!subscribe) return;
 
-  const expireDate = new Date();
-  expireDate.setMonth(expireDate.getMonth() + Number(subscribe.months));
+  //   const expireDate = new Date();
+  //   expireDate.setMonth(expireDate.getMonth() + Number(subscribe.months));
 
-  // Duplicate subscribe push থেকে বাঁচাও
-  const alreadySubscribed = subscribe.subscribeSchools.some(
-    (id) => id.toString() === payment.userId.toString(),
-  );
-  if (!alreadySubscribed) {
-    subscribe.subscribeSchools.push(payment.userId);
-    await subscribe.save();
+  //   // Duplicate subscribe push থেকে বাঁচাও
+  //   const alreadySubscribed = subscribe.subscribeSchools.some(
+  //     (id) => id.toString() === payment.userId.toString(),
+  //   );
+  //   if (!alreadySubscribed) {
+  //     subscribe.subscribeSchools.push(payment.userId);
+  //     await subscribe.save();
+  //   }
+
+  //   const user = await this.userModel.findById(payment.userId);
+  //   if (user) {
+  //     user.subscription = subscribe._id;
+  //     user.subscriptionExpiry = expireDate;
+  //     await user.save();
+  //   }
+  // }
+
+  private async handlePaymentIntentSucceeded(event: StripeEvent) {
+    const intent = event.data.object as any;
+
+    const payment = await this.paymentModel.findOne({
+      stripePaymentIntentId: intent.id,
+    });
+    if (!payment) return;
+
+    payment.status = 'completed';
+    await payment.save();
+
+    // ✅ School subscription payment
+    if (payment.paymentType === 'school') {
+      const school = await this.schoolModel.findById(payment.schoolId);
+      if (!school) return;
+
+      const alreadyInSchool = school.school.some(
+        (id) => id.toString() === payment.userId.toString(),
+      );
+      if (!alreadyInSchool) {
+        school.school.push(payment.userId);
+        await school.save();
+      }
+
+      // User এর schoolName update করো
+      const user = await this.userModel.findById(payment.userId);
+      if (user) {
+        user.schoolName = school._id;
+        await user.save();
+      }
+      return;
+    }
+
+    // ✅ Subscribe payment (আগের logic)
+    if (payment.paymentType === 'subscribe') {
+      const subscribe = await this.subscribeModel.findById(payment.subscribeId);
+      if (!subscribe) return;
+
+      const expireDate = new Date();
+      expireDate.setMonth(expireDate.getMonth() + Number(subscribe.months));
+
+      const alreadySubscribed = subscribe.subscribeSchools.some(
+        (id) => id.toString() === payment.userId.toString(),
+      );
+      if (!alreadySubscribed) {
+        subscribe.subscribeSchools.push(payment.userId);
+        await subscribe.save();
+      }
+
+      const user = await this.userModel.findById(payment.userId);
+      if (user) {
+        user.subscription = subscribe._id;
+        user.subscriptionExpiry = expireDate;
+        await user.save();
+      }
+    }
   }
-
-  const user = await this.userModel.findById(payment.userId);
-  if (user) {
-    user.subscription = subscribe._id;
-    user.subscriptionExpiry = expireDate;
-    await user.save();
-  }
-}
 
   private async handlePaymentIntentFailed(event: StripeEvent) {
     const intent = event.data.object as any;

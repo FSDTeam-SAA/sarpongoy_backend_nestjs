@@ -15,22 +15,22 @@ export class CreateUserDto {
   @ApiPropertyOptional({ example: '69189747004459816445708b' })
   @IsMongoId()
   @IsOptional()
-  schoolName: string;
+  schoolName!: string;
 
   @ApiPropertyOptional({ example: 'saurav' })
   @IsString()
   @IsOptional()
-  firstName: string;
+  firstName!: string;
 
   @ApiPropertyOptional({ example: 'sarkar' })
   @IsString()
   @IsOptional()
-  lastName: string;
+  lastName!: string;
 
   @ApiPropertyOptional({ example: 'Bangladesh' })
   @IsString()
   @IsOptional()
-  country: string;
+  country!: string;
 
   @ApiPropertyOptional({ type: 'string', format: 'binary' })
   @IsOptional()
@@ -39,12 +39,12 @@ export class CreateUserDto {
 
   @ApiPropertyOptional({ example: 'school@gmail.com' })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiPropertyOptional({ example: '123456' })
   @IsString()
   @MinLength(6)
-  password: string;
+  password!: string;
 
   @ApiPropertyOptional({ enum: UserRole, default: UserRole.SCHOOL })
   @IsOptional()

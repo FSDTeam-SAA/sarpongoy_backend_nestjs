@@ -8,56 +8,62 @@ export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ type: Types.ObjectId, ref: 'School' })
-  schoolName: Types.ObjectId;
+  // @Prop({ type: Types.ObjectId, ref: 'School' })
+  // schoolName!: Types.ObjectId;
 
   @Prop({ trim: true })
-  firstName: string;
+  firstName!: string;
 
   @Prop({ trim: true })
-  lastName: string;
+  lastName!: string;
 
   @Prop()
-  country: string;
+  country!: string;
 
   @Prop({ unique: true, lowercase: true, trim: true, required: true })
-  email: string;
+  email!: string;
 
   @Prop({ required: true, minlength: 6, select: false })
-  password: string;
+  password!: string;
 
   @Prop({
     enum: Object.values(UserRole),
     default: UserRole.SCHOOL,
   })
-  role: UserRole;
+  role!: UserRole;
 
-  @Prop() phoneNumber: string;
-  @Prop() address: string;
-  @Prop() schoolLogo: string;
-  @Prop() profilePicture: string;
-  @Prop() uploadeSignature: string;
+  @Prop() phoneNumber!: string;
+  @Prop() address!: string;
+  @Prop() schoolLogo!: string;
+  @Prop() profilePicture!: string;
+  @Prop() uploadeSignature!: string;
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Subscription' })
-  subscription: Types.ObjectId;
+  subscription!: Types.ObjectId;
 
   @Prop({ type: Date })
-  subscriptionExpiry: Date;
+  subscriptionExpiry!: Date;
 
-  @Prop() bio: string;
-  @Prop() totalStudent: number;
+  @Prop() bio!: string;
+  @Prop() totalStudent!: number;
 
   @Prop() otp?: string;
   @Prop() otpExpiry?: Date;
 
   @Prop({ enum: ['active', 'suspended'], default: 'active' })
-  status: string;
+  status!: string;
 
   @Prop({ default: false })
-  verifiedForget: boolean;
+  verifiedForget!: boolean;
 
-  @Prop({ type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Exclesheet' }], default: [] })
-  studentList: Types.ObjectId[];
+  @Prop({
+    type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Exclesheet' }],
+    default: [],
+  })
+  studentList!: Types.ObjectId[];
+
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'School' })
+  schoolName!: Types.ObjectId;  
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

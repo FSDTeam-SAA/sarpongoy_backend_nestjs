@@ -11,6 +11,7 @@ import {
   Subscribe,
   SubscribeDocument,
 } from '../subscribe/entities/subscribe.entity';
+import { School, SchoolDocument } from '../school/entities/school.entity';
 
 @Injectable()
 export class PaymentService {
@@ -23,6 +24,8 @@ export class PaymentService {
     private readonly userModel: Model<UserDocument>,
     @InjectModel(Subscribe.name)
     private readonly subscribeModel: Model<SubscribeDocument>,
+    @InjectModel(School.name)
+    private readonly schoolModel: Model<SchoolDocument>,
   ) {
     this.stripe = new Stripe(config.stripe.secretKey!);
   }
@@ -103,6 +106,101 @@ export class PaymentService {
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
       amount: subscribe.price,
+    };
+  }
+
+  async paySubscribeSchool(userId: string, schoolId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new HttpException('User not found', 404);
+
+    const school = await this.schoolModel.findById(schoolId);
+    if (!school) throw new HttpException('School not found', 404);
+
+    if (!school.subscribePrice || school.subscribePrice <= 0) {
+      throw new HttpException(
+        'This school does not have a valid subscription price',
+        400,
+      );
+    }
+
+    // Already subscribed check (School এর school array তে userId আছে কিনা)
+    const alreadySubscribed = school.school.some(
+      (id) => id.toString() === userId.toString(),
+    );
+    if (alreadySubscribed) {
+      throw new HttpException('You are already subscribed to this school', 400);
+    }
+
+    // Already completed payment check
+    const existingCompleted = await this.paymentModel.findOne({
+      userId: user._id,
+      schoolId: school._id,
+      status: 'completed',
+      paymentType: 'school',
+    });
+    if (existingCompleted) {
+      throw new HttpException('This school subscription is already paid', 400);
+    }
+
+    // Reuse existing pending payment intent if valid
+    const existingPending = await this.paymentModel.findOne({
+      userId: user._id,
+      schoolId: school._id,
+      status: 'pending',
+      paymentType: 'school',
+    });
+
+    if (existingPending?.stripePaymentIntentId) {
+      const existingIntent = await this.stripe.paymentIntents.retrieve(
+        existingPending.stripePaymentIntentId,
+      );
+      if (
+        existingIntent.status !== 'succeeded' &&
+        existingIntent.status !== 'canceled'
+      ) {
+        return {
+          clientSecret: existingIntent.client_secret,
+          paymentIntentId: existingIntent.id,
+          amount: school.subscribePrice,
+        };
+      }
+    }
+
+    // Create new payment intent
+    const paymentIntent = await this.stripe.paymentIntents.create({
+      amount: Math.round(school.subscribePrice * 100),
+      currency: 'gbp',
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        userId: user._id.toString(),
+        schoolId: school._id.toString(),
+        paymentType: 'school',
+        amount: String(school.subscribePrice),
+      },
+    });
+
+    // Save or update payment record
+    if (existingPending) {
+      existingPending.stripePaymentIntentId = paymentIntent.id;
+      existingPending.amount = school.subscribePrice;
+      await existingPending.save();
+    } else {
+      await this.paymentModel.create({
+        userId: user._id,
+        schoolId: school._id,
+        schoolName: school.name,
+        email: user.email,
+        stripePaymentIntentId: paymentIntent.id,
+        amount: school.subscribePrice,
+        paymentType: 'school',
+        status: 'pending',
+      });
+    }
+
+    return {
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amount: school.subscribePrice,
     };
   }
 

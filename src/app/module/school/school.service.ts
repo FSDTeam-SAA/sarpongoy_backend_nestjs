@@ -7,6 +7,7 @@ import { Model } from 'mongoose';
 import { IFilterParams } from 'src/app/helpers/pick';
 import paginationHelper, { IOptions } from 'src/app/helpers/pagenation';
 import buildWhereConditions from 'src/app/helpers/buildWhereConditions';
+import { fileUpload } from 'src/app/helpers/fileUploder';
 
 @Injectable()
 export class SchoolService {
@@ -15,12 +16,16 @@ export class SchoolService {
     private readonly schoolModel: Model<School>,
   ) {}
 
-  async createSchool(createSchoolDto: CreateSchoolDto) {
+  async createSchool(createSchoolDto: CreateSchoolDto,file?: Express.Multer.File) {
     const school = await this.schoolModel.findOne({
       name: createSchoolDto.name,
     });
     if (school) {
       throw new HttpException('School already exists', 400);
+    }
+    if(file){
+      const {url} = await fileUpload.uploadToCloudinary(file);
+      createSchoolDto.NDA = url;
     }
     const newSchool = await this.schoolModel.create(createSchoolDto);
     return newSchool;
@@ -59,10 +64,14 @@ export class SchoolService {
     return school;
   }
 
-  async updateSchool(id: string, updateSchoolDto: UpdateSchoolDto) {
+  async updateSchool(id: string, updateSchoolDto: UpdateSchoolDto, file?: Express.Multer.File) {
     const school = await this.schoolModel.findById(id);
     if (!school) {
       throw new HttpException('School not found', 404);
+    }
+    if(file){
+      const {url} = await fileUpload.uploadToCloudinary(file);
+      updateSchoolDto.NDA = url;
     }
     const updatedSchool = await this.schoolModel.findByIdAndUpdate(
       id,
