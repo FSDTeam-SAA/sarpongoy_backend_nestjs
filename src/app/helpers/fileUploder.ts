@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
+import path from 'path';
 import { memoryStorage } from 'multer';
 import streamifier from 'streamifier';
 import { v2 as cloudinary } from 'cloudinary';
@@ -30,23 +31,32 @@ const uploadToCloudinary = async (
     file.mimetype === 'application/vnd.ms-excel' ||
     file.mimetype ===
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const isPdf = file.mimetype === 'application/pdf';
 
-  if (!isImage && !isExcel) {
-    throw new HttpException('Only image and Excel files are allowed', 400);
+  if (!isImage && !isExcel && !isPdf) {
+    throw new HttpException(
+      'Only image, Excel, and PDF files are allowed',
+      400,
+    );
   }
+
+  const ext = path.extname(file.originalname);
+  const baseName = path.basename(file.originalname, ext);
+  const uniqueName = `${baseName}_${Date.now()}${ext}`;
 
   const uploadOptions: any = {
     folder: 'healthcare_app',
     resource_type: isImage ? 'image' : 'raw',
+    ...(isImage
+      ? {
+          transformation: {
+            width: 500,
+            height: 500,
+            crop: 'limit',
+          },
+        }
+      : { public_id: uniqueName }),
   };
-
-  if (isImage) {
-    uploadOptions.transformation = {
-      width: 500,
-      height: 500,
-      crop: 'limit',
-    };
-  }
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
