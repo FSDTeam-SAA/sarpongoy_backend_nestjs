@@ -1,6 +1,6 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import config from 'src/app/config';
 import { Payment, PaymentDocument } from './entities/payment.entity';
@@ -12,6 +12,54 @@ import {
   SubscribeDocument,
 } from '../subscribe/entities/subscribe.entity';
 import { School, SchoolDocument } from '../school/entities/school.entity';
+import {
+  PaymentHistory,
+  PaymentHistoryDocument,
+} from './entities/payment-history.entity';
+import {
+  calculateSchoolPaymentStatus,
+} from 'src/app/helpers/termPaymentStatus';
+import { UserRole } from '../user/user-role.enum';
+
+type SchoolPaymentPlan =
+  | 'first_term'
+  | 'second_term'
+  | 'third_term'
+  | 'full_year';
+
+type SchoolPaymentRequest = {
+  paymentPlan?: SchoolPaymentPlan;
+  forceNew?: boolean;
+  termDueDates?: {
+    firstTerm?: string;
+    secondTerm?: string;
+    thirdTerm?: string;
+  };
+  offlinePaymentNote?: string;
+};
+
+const TERM_PAYMENT_PLANS = ['first_term', 'second_term', 'third_term'];
+const DEFAULT_SCHOOL_PAYMENT_PLAN: SchoolPaymentPlan = 'full_year';
+
+type SchoolPaymentSummaryHistory = {
+  _id: string;
+  paymentId?: {
+    _id?: string;
+  } | string | null;
+  paymentPlan?: string;
+  paymentMethod?: string;
+  status?: string;
+  amount?: number;
+  note?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  changedBy?: {
+    _id?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+  } | null;
+};
 
 @Injectable()
 export class PaymentService {
@@ -26,8 +74,31 @@ export class PaymentService {
     private readonly subscribeModel: Model<SubscribeDocument>,
     @InjectModel(School.name)
     private readonly schoolModel: Model<SchoolDocument>,
+    @InjectModel(PaymentHistory.name)
+    private readonly paymentHistoryModel: Model<PaymentHistoryDocument>,
   ) {
     this.stripe = new Stripe(config.stripe.secretKey!);
+  }
+
+  private async createPaymentHistory(
+    payment: PaymentDocument,
+    status = payment.status,
+    changedBy?: string,
+    note?: string,
+  ) {
+    if (payment.paymentType !== 'school' || !payment.schoolId) return;
+
+    await this.paymentHistoryModel.create({
+      paymentId: payment._id,
+      schoolId: payment.schoolId,
+      userId: payment.userId,
+      changedBy: changedBy ? new Types.ObjectId(changedBy) : undefined,
+      paymentPlan: payment.paymentPlan || 'full_year',
+      paymentMethod: payment.paymentMethod || 'stripe',
+      status,
+      amount: payment.amount || 0,
+      note,
+    });
   }
 
   async paySubscribe(userId: string, subscribeId: string) {
@@ -109,19 +180,95 @@ export class PaymentService {
     };
   }
 
-  async paySubscribeSchool(userId: string, schoolId: string) {
+  private getSchoolPaymentPlan(value?: string): SchoolPaymentPlan {
+    if (
+      value === 'first_term' ||
+      value === 'second_term' ||
+      value === 'third_term' ||
+      value === 'full_year'
+    ) {
+      return value;
+    }
+
+    return DEFAULT_SCHOOL_PAYMENT_PLAN;
+  }
+
+  private getSchoolPaymentAmounts(
+    user: UserDocument,
+    school: SchoolDocument,
+    paymentPlan: SchoolPaymentPlan,
+  ) {
+    const totalStudents = Number(user.totalStudent || 0);
+    const perStudentCharge = Number(school.subscribePrice || 0);
+    const totalAmount = Number((totalStudents * perStudentCharge).toFixed(2));
+    const amount = TERM_PAYMENT_PLANS.includes(paymentPlan)
+      ? Number((totalAmount / 3).toFixed(2))
+      : totalAmount;
+
+    if (totalStudents <= 0) {
+      throw new HttpException('This school does not have total students set', 400);
+    }
+
+    if (perStudentCharge <= 0) {
+      throw new HttpException(
+        'This school does not have a valid per-student charge',
+        400,
+      );
+    }
+
+    return {
+      totalStudents,
+      perStudentCharge,
+      totalAmount,
+      amount,
+    };
+  }
+
+  private getSchoolTermDueDates(school: SchoolDocument) {
+    return {
+      firstTerm: school.termConfig?.firstTermDueDate,
+      secondTerm: school.termConfig?.secondTermDueDate,
+      thirdTerm: school.termConfig?.thirdTermDueDate,
+    };
+  }
+
+  private async activateSchoolPaymentAccess(payment: PaymentDocument) {
+    if (payment.paymentType !== 'school' || !payment.schoolId) return;
+
+    const school = await this.schoolModel.findById(payment.schoolId);
+    if (!school) throw new HttpException('School not found', 404);
+
+    const schoolMembers = school.school || [];
+    const alreadyInSchool = schoolMembers.some(
+      (id) => id.toString() === payment.userId.toString(),
+    );
+    if (!alreadyInSchool) {
+      school.school = schoolMembers;
+      school.school.push(payment.userId);
+      await school.save();
+    }
+
+    const user = await this.userModel.findById(payment.userId);
+    if (user) {
+      user.schoolName = school._id;
+      await user.save();
+    }
+  }
+
+  async paySubscribeSchool(
+    userId: string,
+    schoolId: string,
+    payload: SchoolPaymentRequest = {},
+  ) {
     const user = await this.userModel.findById(userId);
     if (!user) throw new HttpException('User not found', 404);
 
     const school = await this.schoolModel.findById(schoolId);
     if (!school) throw new HttpException('School not found', 404);
 
-    if (!school.subscribePrice || school.subscribePrice <= 0) {
-      throw new HttpException(
-        'This school does not have a valid subscription price',
-        400,
-      );
-    }
+    const paymentPlan = this.getSchoolPaymentPlan(payload.paymentPlan);
+    const termDueDates = this.getSchoolTermDueDates(school);
+    const amounts = this.getSchoolPaymentAmounts(user, school, paymentPlan);
 
     // Completed payments are the source of truth. The school array is updated
     // by the webhook after Stripe confirms payment.
@@ -135,6 +282,19 @@ export class PaymentService {
       throw new HttpException('This school subscription is already paid', 400);
     }
 
+    const existingOfflinePending = await this.paymentModel.findOne({
+      userId: user._id,
+      schoolId: school._id,
+      status: 'offline_pending',
+      paymentType: 'school',
+    });
+    if (existingOfflinePending) {
+      throw new HttpException(
+        'An offline payment request is already waiting for admin approval',
+        400,
+      );
+    }
+
     // Reuse existing pending payment intent if valid
     const existingPending = await this.paymentModel.findOne({
       userId: user._id,
@@ -143,58 +303,331 @@ export class PaymentService {
       paymentType: 'school',
     });
 
-    if (existingPending?.stripePaymentIntentId) {
-      const existingIntent = await this.stripe.paymentIntents.retrieve(
-        existingPending.stripePaymentIntentId,
-      );
-      if (
-        existingIntent.status !== 'succeeded' &&
-        existingIntent.status !== 'canceled'
-      ) {
-        return {
-          clientSecret: existingIntent.client_secret,
-          paymentIntentId: existingIntent.id,
-          amount: school.subscribePrice,
-        };
+    if (!payload.forceNew && existingPending?.stripePaymentIntentId) {
+      try {
+        const existingIntent = await this.stripe.paymentIntents.retrieve(
+          existingPending.stripePaymentIntentId,
+        );
+        const amountMatches =
+          existingPending.amount === amounts.amount &&
+          existingPending.paymentPlan === paymentPlan;
+
+        if (
+          amountMatches &&
+          existingIntent.status !== 'succeeded' &&
+          existingIntent.status !== 'canceled'
+        ) {
+          return {
+            clientSecret: existingIntent.client_secret,
+            paymentIntentId: existingIntent.id,
+            amount: existingPending.amount,
+            totalStudents: existingPending.totalStudents,
+            perStudentCharge: existingPending.perStudentCharge,
+            totalAmount: existingPending.totalAmount,
+          };
+        }
+      } catch {
+        // Stale intents can happen after Stripe key/account changes. Refresh below.
       }
     }
 
     // Create new payment intent
     const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: Math.round(school.subscribePrice * 100),
+      amount: Math.round(amounts.amount * 100),
       currency: 'gbp',
       automatic_payment_methods: { enabled: true },
       metadata: {
         userId: user._id.toString(),
         schoolId: school._id.toString(),
         paymentType: 'school',
-        amount: String(school.subscribePrice),
+        paymentPlan,
+        amount: String(amounts.amount),
+        totalStudents: String(amounts.totalStudents),
+        perStudentCharge: String(amounts.perStudentCharge),
+        totalAmount: String(amounts.totalAmount),
       },
     });
 
     // Save or update payment record
     if (existingPending) {
       existingPending.stripePaymentIntentId = paymentIntent.id;
-      existingPending.amount = school.subscribePrice;
+      existingPending.amount = amounts.amount;
+      existingPending.totalStudents = amounts.totalStudents;
+      existingPending.perStudentCharge = amounts.perStudentCharge;
+      existingPending.totalAmount = amounts.totalAmount;
+      existingPending.paymentPlan = paymentPlan;
+      existingPending.termDueDates = termDueDates;
+      existingPending.paymentMethod = 'stripe';
       await existingPending.save();
+      await this.createPaymentHistory(
+        existingPending,
+        'pending',
+        undefined,
+        'Stripe payment intent refreshed',
+      );
     } else {
-      await this.paymentModel.create({
+      const payment = await this.paymentModel.create({
         userId: user._id,
         schoolId: school._id,
         schoolName: school.name,
         email: user.email,
         stripePaymentIntentId: paymentIntent.id,
-        amount: school.subscribePrice,
+        amount: amounts.amount,
+        totalStudents: amounts.totalStudents,
+        perStudentCharge: amounts.perStudentCharge,
+        totalAmount: amounts.totalAmount,
+        paymentPlan,
+        termDueDates,
+        paymentMethod: 'stripe',
         paymentType: 'school',
         status: 'pending',
       });
+      await this.createPaymentHistory(
+        payment,
+        'pending',
+        undefined,
+        'Stripe payment intent created',
+      );
     }
 
     return {
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
-      amount: school.subscribePrice,
+      ...amounts,
     };
+  }
+
+  async requestOfflineSchoolPayment(
+    userId: string,
+    schoolId: string,
+    payload: SchoolPaymentRequest = {},
+  ) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new HttpException('User not found', 404);
+
+    const school = await this.schoolModel.findById(schoolId);
+    if (!school) throw new HttpException('School not found', 404);
+
+    const paymentPlan = this.getSchoolPaymentPlan(payload.paymentPlan);
+    const termDueDates = this.getSchoolTermDueDates(school);
+    const amounts = this.getSchoolPaymentAmounts(user, school, paymentPlan);
+
+    const existingCompleted = await this.paymentModel.findOne({
+      userId: user._id,
+      schoolId: school._id,
+      status: 'completed',
+      paymentType: 'school',
+    });
+    if (existingCompleted) {
+      throw new HttpException('This school subscription is already paid', 400);
+    }
+
+    const existingOfflinePending = await this.paymentModel.findOne({
+      userId: user._id,
+      schoolId: school._id,
+      status: 'offline_pending',
+      paymentType: 'school',
+    });
+    if (existingOfflinePending) {
+      existingOfflinePending.amount = amounts.amount;
+      existingOfflinePending.totalStudents = amounts.totalStudents;
+      existingOfflinePending.perStudentCharge = amounts.perStudentCharge;
+      existingOfflinePending.totalAmount = amounts.totalAmount;
+      existingOfflinePending.paymentPlan = paymentPlan;
+      existingOfflinePending.termDueDates = termDueDates;
+      existingOfflinePending.offlinePaymentNote =
+        payload.offlinePaymentNote?.trim() || existingOfflinePending.offlinePaymentNote;
+      await existingOfflinePending.save();
+      await this.createPaymentHistory(
+        existingOfflinePending,
+        'offline_pending',
+        undefined,
+        'Offline payment request updated',
+      );
+      return existingOfflinePending;
+    }
+
+    const payment = await this.paymentModel.create({
+      userId: user._id,
+      schoolId: school._id,
+      schoolName: school.name,
+      email: user.email,
+      amount: amounts.amount,
+      totalStudents: amounts.totalStudents,
+      perStudentCharge: amounts.perStudentCharge,
+      totalAmount: amounts.totalAmount,
+      paymentPlan,
+      termDueDates,
+      paymentMethod: 'offline',
+      offlinePaymentNote: payload.offlinePaymentNote?.trim(),
+      paymentType: 'school',
+      status: 'offline_pending',
+    });
+    await this.createPaymentHistory(
+      payment,
+      'offline_pending',
+      undefined,
+      'Offline payment request submitted',
+    );
+
+    return payment;
+  }
+
+  async approveOfflineSchoolPayment(paymentId: string, adminId: string) {
+    const payment = await this.paymentModel.findById(paymentId);
+    if (!payment) throw new HttpException('Payment not found', 404);
+
+    if (payment.paymentType !== 'school' || payment.paymentMethod !== 'offline') {
+      throw new HttpException('Only offline school payments can be approved', 400);
+    }
+
+    if (payment.status === 'completed') return payment;
+
+    if (payment.status !== 'offline_pending') {
+      throw new HttpException('This offline payment is not waiting for approval', 400);
+    }
+
+    payment.status = 'completed';
+    payment.approvedBy = new Types.ObjectId(adminId);
+    payment.approvedAt = new Date();
+    await payment.save();
+
+    await this.activateSchoolPaymentAccess(payment);
+    await this.createPaymentHistory(
+      payment,
+      'completed',
+      adminId,
+      'Offline payment approved by admin',
+    );
+
+    return payment;
+  }
+
+  private getPaymentsForSchool(payments: PaymentDocument[], schoolId: unknown) {
+    return payments.filter(
+      (payment) => payment.schoolId?.toString() === schoolId?.toString(),
+    );
+  }
+
+  async getAllSchoolPaymentStatuses() {
+    const [schools, payments] = await Promise.all([
+      this.schoolModel.find().populate('school', 'email totalStudent').lean(),
+      this.paymentModel
+        .find({ paymentType: 'school' })
+        .sort({ createdAt: -1 } as never)
+        .lean(),
+    ]);
+
+    return schools.map((school) => {
+      const schoolPayments = this.getPaymentsForSchool(
+        payments as PaymentDocument[],
+        school._id,
+      );
+      const status = calculateSchoolPaymentStatus(
+        school.termConfig || {},
+        schoolPayments,
+      );
+      const latestPayment = schoolPayments[0];
+
+      return {
+        schoolId: school._id,
+        schoolName: school.name,
+        totalStudents: (school.school || []).reduce(
+          (total: number, member: any) =>
+            total + Number(member?.totalStudent || 0),
+          0,
+        ),
+        perStudentCharge: school.subscribePrice || 0,
+        activeTerm: status.activeTerm,
+        overdueTerm: status.overdueTerm,
+        isRestricted: status.isRestricted,
+        reason: status.reason,
+        paymentAccessStatus: status.isRestricted ? 'restricted' : 'active',
+        latestPayment: latestPayment
+          ? {
+              id: latestPayment._id,
+              amount: latestPayment.amount,
+              status: latestPayment.status,
+              paymentPlan: latestPayment.paymentPlan,
+              paymentMethod: latestPayment.paymentMethod,
+            }
+          : null,
+        termConfig: school.termConfig || {},
+      };
+    });
+  }
+
+  async updatePaymentStatus(
+    paymentId: string,
+    status: 'pending' | 'offline_pending' | 'completed' | 'failed' | 'refunded',
+    adminId: string,
+  ) {
+    const payment = await this.paymentModel.findById(paymentId);
+    if (!payment) throw new HttpException('Payment not found', 404);
+
+    payment.status = status;
+    if (status === 'completed') {
+      payment.approvedBy = new Types.ObjectId(adminId);
+      payment.approvedAt = payment.approvedAt || new Date();
+      await payment.save();
+      await this.activateSchoolPaymentAccess(payment);
+    } else {
+      await payment.save();
+    }
+
+    await this.createPaymentHistory(
+      payment,
+      status,
+      adminId,
+      `Payment status manually updated to ${status}`,
+    );
+
+    return payment;
+  }
+
+  async syncSchoolPaymentAccessStatuses(now = new Date()) {
+    const [schools, payments] = await Promise.all([
+      this.schoolModel.find(),
+      this.paymentModel.find({ paymentType: 'school' }),
+    ]);
+
+    let updated = 0;
+    for (const school of schools) {
+      const schoolPayments = this.getPaymentsForSchool(payments, school._id);
+      const status = calculateSchoolPaymentStatus(
+        school.termConfig || {},
+        schoolPayments,
+        now,
+      );
+      const nextAccessStatus = status.isRestricted ? 'restricted' : 'active';
+
+      if (
+        school.paymentAccessStatus !== nextAccessStatus ||
+        school.overdueTerm !== status.overdueTerm
+      ) {
+        school.paymentAccessStatus = nextAccessStatus;
+        school.overdueTerm = status.overdueTerm;
+        school.paymentAccessCheckedAt = new Date();
+        await school.save();
+        updated += 1;
+
+        if (status.isRestricted && status.overdueTerm !== 'none') {
+          await this.paymentHistoryModel.create({
+            schoolId: school._id,
+            paymentPlan:
+              status.overdueTerm === 'full_payment'
+                ? 'full_year'
+                : status.overdueTerm,
+            paymentMethod: 'system',
+            status: 'overdue',
+            amount: 0,
+            note: status.reason,
+          });
+        }
+      }
+    }
+
+    return { checked: schools.length, updated };
   }
 
   async getAllPayment(params: IFilterParams, options: IOptions) {
@@ -221,7 +654,8 @@ export class PaymentService {
       .skip(skip)
       .limit(limit)
       .sort({ [sortBy]: sortOrder } as never)
-      .populate('userId', 'email schoolName')
+      .populate('userId', 'email schoolName totalStudent')
+      .populate('schoolId', 'name school subscribePrice')
       .populate('subscribeId');
 
     return { meta: { page, limit, total }, data };
@@ -230,7 +664,8 @@ export class PaymentService {
   async getSinglePayment(id: string) {
     const payment = await this.paymentModel
       .findById(id)
-      .populate('userId', 'email schoolName')
+      .populate('userId', 'email schoolName totalStudent')
+      .populate('schoolId', 'name school subscribePrice')
       .populate('subscribeId');
 
     if (!payment) throw new HttpException('Payment not found', 404);
@@ -241,18 +676,160 @@ export class PaymentService {
     const school = await this.schoolModel.findById(schoolId);
     if (!school) throw new HttpException('School not found', 404);
 
-    const payment = await this.paymentModel.findOne({
+    const payments = await this.paymentModel.find({
       userId,
       schoolId: school._id,
-      status: 'completed',
       paymentType: 'school',
     });
+    const payment = payments.find((item) => item.status === 'completed');
+    const status = calculateSchoolPaymentStatus(
+      school.termConfig || {},
+      payments,
+    );
+    const hasPaymentAccess =
+      Boolean(payment) || (status.hasConfiguredDueDate && !status.isRestricted);
 
     return {
-      hasAccess: Boolean(payment),
+      hasAccess: hasPaymentAccess,
+      isRestricted: status.isRestricted,
+      hasConfiguredDueDate: status.hasConfiguredDueDate,
+      activeTerm: status.activeTerm,
+      overdueTerm: status.overdueTerm,
+      reason: status.reason,
       schoolId: school._id,
       amount: payment?.amount || school.subscribePrice || 0,
-      status: payment?.status || 'unpaid',
+      status: status.isRestricted ? 'restricted' : payment?.status || 'unpaid',
+    };
+  }
+
+  async getSchoolPaymentOverview(
+    userId: string,
+    role: string,
+    schoolId: string,
+  ) {
+    if (role === UserRole.SCHOOL) {
+      const user = await this.userModel.findById(userId);
+      const assignedSchoolId = user?.schoolName?.toString?.() || '';
+      if (!assignedSchoolId || assignedSchoolId !== schoolId) {
+        throw new HttpException('Forbidden', 403);
+      }
+    }
+
+    const school = await this.schoolModel
+      .findById(schoolId)
+      .populate('school', 'email totalStudent firstName lastName role profilePicture schoolLogo')
+      .lean();
+    if (!school) throw new HttpException('School not found', 404);
+
+    const schoolAccounts = await this.userModel
+      .find({ schoolName: school._id })
+      .select('email totalStudent firstName lastName role profilePicture schoolLogo studentList')
+      .lean();
+
+    const payments = await this.paymentModel
+      .find({ userId: { $exists: true }, schoolId: school._id, paymentType: 'school' })
+      .sort({ createdAt: -1 } as never)
+      .populate('userId', 'email totalStudent schoolName')
+      .populate('schoolId', 'name school subscribePrice')
+      .lean();
+
+    const histories = await this.paymentHistoryModel
+      .find({ schoolId: school._id })
+      .sort({ createdAt: -1 } as never)
+      .populate('paymentId', 'amount status paymentPlan paymentMethod totalAmount')
+      .populate('userId', 'email totalStudent schoolName')
+      .populate('changedBy', 'email firstName lastName')
+      .lean();
+
+    const paymentList = payments as any[];
+    const historyList = histories as any[];
+    const status = calculateSchoolPaymentStatus(school.termConfig || {}, paymentList);
+
+    const totalStudents = schoolAccounts.reduce(
+      (total: number, account: any) => total + Number(account?.totalStudent || 0),
+      0,
+    );
+    const perStudentCharge = Number(school.subscribePrice || 0);
+    const totalAmountDue = Number((totalStudents * perStudentCharge).toFixed(2));
+    const totalCollected = paymentList
+      .filter(payment => payment.status === 'completed')
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const balanceDue = Math.max(0, Number((totalAmountDue - totalCollected).toFixed(2)));
+    const latestPayment = paymentList[0] || null;
+    const latestHistory = historyList[0] || null;
+
+    return {
+      schoolId: school._id,
+      schoolName: school.name,
+      school,
+      schoolAccounts,
+      termConfig: school.termConfig || {},
+      paymentAccessStatus: status.isRestricted ? 'restricted' : 'active',
+      activeTerm: status.activeTerm,
+      overdueTerm: status.overdueTerm,
+      isRestricted: status.isRestricted,
+      hasConfiguredDueDate: status.hasConfiguredDueDate,
+      reason: status.reason,
+      totalStudents,
+      perStudentCharge,
+      totalAmountDue,
+      totalCollected,
+      balanceDue,
+      latestPayment: latestPayment
+        ? {
+            id: latestPayment._id,
+            amount: latestPayment.amount,
+            status: latestPayment.status,
+            paymentPlan: latestPayment.paymentPlan,
+            paymentMethod: latestPayment.paymentMethod,
+            createdAt: latestPayment.createdAt,
+          }
+        : null,
+      latestHistory: latestHistory
+        ? {
+            id: latestHistory._id,
+            paymentId:
+              typeof latestHistory.paymentId === 'object'
+                ? latestHistory.paymentId?._id?.toString?.() || latestHistory.paymentId?._id || ''
+                : latestHistory.paymentId?.toString?.() || latestHistory.paymentId || '',
+            paymentPlan: latestHistory.paymentPlan,
+            paymentMethod: latestHistory.paymentMethod,
+            status: latestHistory.status,
+            amount: latestHistory.amount,
+            note: latestHistory.note,
+            createdAt: latestHistory.createdAt,
+            updatedAt: latestHistory.updatedAt,
+          }
+        : null,
+      payments: paymentList.map(payment => ({
+        id: payment._id,
+        amount: payment.amount,
+        status: payment.status,
+        paymentPlan: payment.paymentPlan,
+        paymentMethod: payment.paymentMethod,
+        totalStudents: payment.totalStudents,
+        totalAmount: payment.totalAmount,
+        perStudentCharge: payment.perStudentCharge,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt,
+        email: payment.email,
+        offlinePaymentNote: payment.offlinePaymentNote,
+      })),
+      paymentHistory: historyList.map((history: SchoolPaymentSummaryHistory & Record<string, any>) => ({
+        id: history._id,
+        paymentId:
+          typeof history.paymentId === 'object'
+            ? history.paymentId?._id?.toString?.() || history.paymentId?._id || ''
+            : history.paymentId?.toString?.() || history.paymentId || '',
+        paymentPlan: history.paymentPlan,
+        paymentMethod: history.paymentMethod,
+        status: history.status,
+        amount: history.amount,
+        note: history.note,
+        createdAt: history.createdAt,
+        updatedAt: history.updatedAt,
+        changedBy: history.changedBy,
+      })),
     };
   }
 

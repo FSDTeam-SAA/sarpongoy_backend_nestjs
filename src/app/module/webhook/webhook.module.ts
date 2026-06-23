@@ -6,6 +6,10 @@ import { Payment, PaymentSchema } from '../payment/entities/payment.entity';
 import { User, UserSchema } from '../user/entities/user.entity';
 import { Subscribe, SubscribeSchema } from '../subscribe/entities/subscribe.entity';
 import { School, SchoolSchema } from '../school/entities/school.entity';
+import {
+  PaymentHistory,
+  PaymentHistorySchema,
+} from '../payment/entities/payment-history.entity';
 
 @Module({
   imports: [
@@ -14,6 +18,7 @@ import { School, SchoolSchema } from '../school/entities/school.entity';
       { name: User.name, schema: UserSchema },
       { name: Subscribe.name, schema: SubscribeSchema },
       { name: School.name, schema: SchoolSchema },
+      { name: PaymentHistory.name, schema: PaymentHistorySchema },
     ]),
   ],
   controllers: [WebhookController],

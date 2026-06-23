@@ -10,6 +10,11 @@ import {
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
 import { School, SchoolSchema } from '../school/entities/school.entity';
+import {
+  PaymentHistory,
+  PaymentHistorySchema,
+} from './entities/payment-history.entity';
+import { TermPaymentCronService } from 'src/app/helpers/cron/term-payment.cron';
 
 @Module({
   imports: [
@@ -19,9 +24,11 @@ import { School, SchoolSchema } from '../school/entities/school.entity';
       { name: User.name, schema: UserSchema },
       { name: Subscribe.name, schema: SubscribeSchema },
       { name: School.name, schema: SchoolSchema },
+      { name: PaymentHistory.name, schema: PaymentHistorySchema },
     ]),
   ],
   controllers: [PaymentController],
-  providers: [PaymentService],
+  providers: [PaymentService, TermPaymentCronService],
+  exports: [PaymentService],
 })
 export class PaymentModule {}

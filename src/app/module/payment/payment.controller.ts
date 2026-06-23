@@ -6,6 +6,8 @@ import {
   Req,
   UseGuards,
   Get,
+  Body,
+  Patch,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -53,13 +55,73 @@ export class PaymentController {
   async paySubscribeSchool(
     @Req() req: Request,
     @Param('schoolId') schoolId: string,
+    @Body()
+    body: {
+      paymentPlan?: 'first_term' | 'second_term' | 'third_term' | 'full_year';
+      forceNew?: boolean;
+      termDueDates?: {
+        firstTerm?: string;
+        secondTerm?: string;
+        thirdTerm?: string;
+      };
+    },
   ) {
     const result = await this.paymentService.paySubscribeSchool(
       req.user!.id,
       schoolId,
+      body,
     );
     return {
       message: 'Payment intent created successfully',
+      data: result,
+    };
+  }
+
+  @Post('school/:schoolId/offline')
+  @ApiOperation({ summary: 'Request offline school subscription approval' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @HttpCode(HttpStatus.CREATED)
+  async requestOfflineSchoolPayment(
+    @Req() req: Request,
+    @Param('schoolId') schoolId: string,
+    @Body()
+    body: {
+      paymentPlan?: 'first_term' | 'second_term' | 'third_term' | 'full_year';
+      termDueDates?: {
+        firstTerm?: string;
+        secondTerm?: string;
+        thirdTerm?: string;
+      };
+      offlinePaymentNote?: string;
+    },
+  ) {
+    const result = await this.paymentService.requestOfflineSchoolPayment(
+      req.user!.id,
+      schoolId,
+      body,
+    );
+    return {
+      message: 'Offline payment request submitted for admin approval',
+      data: result,
+    };
+  }
+
+  @Post(':id/approve-offline')
+  @ApiOperation({ summary: 'Approve an offline school payment' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard('admin'))
+  @HttpCode(HttpStatus.OK)
+  async approveOfflineSchoolPayment(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    const result = await this.paymentService.approveOfflineSchoolPayment(
+      id,
+      req.user!.id,
+    );
+    return {
+      message: 'Offline payment approved successfully',
       data: result,
     };
   }
@@ -97,6 +159,43 @@ export class PaymentController {
     };
   }
 
+  @Get('school-status')
+  @ApiOperation({ summary: 'Get school term payment statuses' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard('admin'))
+  @HttpCode(HttpStatus.OK)
+  async getAllSchoolPaymentStatuses() {
+    const result = await this.paymentService.getAllSchoolPaymentStatuses();
+    return {
+      message: 'School payment statuses retrieved successfully',
+      data: result,
+    };
+  }
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Manually update payment status' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard('admin'))
+  @HttpCode(HttpStatus.OK)
+  async updatePaymentStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      status: 'pending' | 'offline_pending' | 'completed' | 'failed' | 'refunded';
+    },
+  ) {
+    const result = await this.paymentService.updatePaymentStatus(
+      id,
+      body.status,
+      req.user!.id,
+    );
+    return {
+      message: 'Payment status updated successfully',
+      data: result,
+    };
+  }
+
   @Get('school/:schoolId/access')
   @ApiOperation({ summary: 'Check current user school payment access' })
   @ApiBearerAuth('access-token')
@@ -112,6 +211,26 @@ export class PaymentController {
     );
     return {
       message: 'School payment access checked successfully',
+      data: result,
+    };
+  }
+
+  @Get('school/:schoolId/overview')
+  @ApiOperation({ summary: 'Get school payment overview with history' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.ADMIN, UserRole.SCHOOL))
+  @HttpCode(HttpStatus.OK)
+  async getSchoolPaymentOverview(
+    @Req() req: Request,
+    @Param('schoolId') schoolId: string,
+  ) {
+    const result = await this.paymentService.getSchoolPaymentOverview(
+      req.user!.id,
+      req.user!.role,
+      schoolId,
+    );
+    return {
+      message: 'School payment overview retrieved successfully',
       data: result,
     };
   }

@@ -4,6 +4,10 @@ import config from 'src/app/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Payment, PaymentDocument } from '../payment/entities/payment.entity';
+import {
+  PaymentHistory,
+  PaymentHistoryDocument,
+} from '../payment/entities/payment-history.entity';
 import type { Response } from 'express';
 import {
   Subscribe,
@@ -32,7 +36,28 @@ export class WebhookService {
     private readonly userModel: Model<UserDocument>,
     @InjectModel(School.name)
     private readonly schoolModel: Model<SchoolDocument>,
+    @InjectModel(PaymentHistory.name)
+    private readonly paymentHistoryModel: Model<PaymentHistoryDocument>,
   ) {}
+
+  private async createSchoolPaymentHistory(
+    payment: PaymentDocument,
+    status = payment.status,
+    note?: string,
+  ) {
+    if (payment.paymentType !== 'school' || !payment.schoolId) return;
+
+    await this.paymentHistoryModel.create({
+      paymentId: payment._id,
+      schoolId: payment.schoolId,
+      userId: payment.userId,
+      paymentPlan: payment.paymentPlan || 'full_year',
+      paymentMethod: payment.paymentMethod || 'stripe',
+      status,
+      amount: payment.amount || 0,
+      note,
+    });
+  }
 
   async handleWebhook(rawBody: Buffer, sig: string, res: Response) {
     if (!sig) {
@@ -117,16 +142,23 @@ export class WebhookService {
 
     payment.status = 'completed';
     await payment.save();
+    await this.createSchoolPaymentHistory(
+      payment,
+      'completed',
+      'Stripe payment completed',
+    );
 
     // ✅ School subscription payment
     if (payment.paymentType === 'school') {
       const school = await this.schoolModel.findById(payment.schoolId);
       if (!school) return;
 
-      const alreadyInSchool = school.school.some(
+      const schoolMembers = school.school || [];
+      const alreadyInSchool = schoolMembers.some(
         (id) => id.toString() === payment.userId.toString(),
       );
       if (!alreadyInSchool) {
+        school.school = schoolMembers;
         school.school.push(payment.userId);
         await school.save();
       }
@@ -175,5 +207,10 @@ export class WebhookService {
 
     payment.status = 'failed';
     await payment.save();
+    await this.createSchoolPaymentHistory(
+      payment,
+      'failed',
+      'Stripe payment failed',
+    );
   }
 }
