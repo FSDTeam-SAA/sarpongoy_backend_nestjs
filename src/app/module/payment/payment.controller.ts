@@ -97,6 +97,25 @@ export class PaymentController {
     };
   }
 
+  @Get('school/:schoolId/access')
+  @ApiOperation({ summary: 'Check current user school payment access' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @HttpCode(HttpStatus.OK)
+  async getSchoolPaymentAccess(
+    @Req() req: Request,
+    @Param('schoolId') schoolId: string,
+  ) {
+    const result = await this.paymentService.getSchoolPaymentAccess(
+      req.user!.id,
+      schoolId,
+    );
+    return {
+      message: 'School payment access checked successfully',
+      data: result,
+    };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get payment by Id' })
   @HttpCode(HttpStatus.OK)

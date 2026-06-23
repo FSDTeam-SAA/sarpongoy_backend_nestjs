@@ -9,14 +9,11 @@ import * as jwt from '@nestjs/jwt';
 import config from '../../config';
 import sendMailer from 'src/app/helpers/sendMailer';
 import { fileUpload } from 'src/app/helpers/fileUploder';
-import { School, SchoolDocument } from '../school/entities/school.entity';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
-    @InjectModel(School.name)
-    private readonly schoolModel: Model<SchoolDocument>,
     private readonly jwtService: jwt.JwtService,
   ) {}
 
@@ -50,12 +47,7 @@ export class AuthService {
       );
       CreateAuthDto.profilePicture = uploadedFile.url;
     }
-    const newUser = await this.userModel.create(CreateAuthDto);
-    await this.schoolModel.findOneAndUpdate(
-      { _id: CreateAuthDto.schoolName },
-      { $push: { school: newUser._id } },
-    );
-    return newUser;
+    return this.userModel.create(CreateAuthDto);
   }
 
   async login(loginDto: { email: string; password: string }, res: Response) {

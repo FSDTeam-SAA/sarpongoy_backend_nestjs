@@ -123,15 +123,8 @@ export class PaymentService {
       );
     }
 
-    // Already subscribed check (School এর school array তে userId আছে কিনা)
-    const alreadySubscribed = school.school.some(
-      (id) => id.toString() === userId.toString(),
-    );
-    if (alreadySubscribed) {
-      throw new HttpException('You are already subscribed to this school', 400);
-    }
-
-    // Already completed payment check
+    // Completed payments are the source of truth. The school array is updated
+    // by the webhook after Stripe confirms payment.
     const existingCompleted = await this.paymentModel.findOne({
       userId: user._id,
       schoolId: school._id,
@@ -242,6 +235,25 @@ export class PaymentService {
 
     if (!payment) throw new HttpException('Payment not found', 404);
     return payment;
+  }
+
+  async getSchoolPaymentAccess(userId: string, schoolId: string) {
+    const school = await this.schoolModel.findById(schoolId);
+    if (!school) throw new HttpException('School not found', 404);
+
+    const payment = await this.paymentModel.findOne({
+      userId,
+      schoolId: school._id,
+      status: 'completed',
+      paymentType: 'school',
+    });
+
+    return {
+      hasAccess: Boolean(payment),
+      schoolId: school._id,
+      amount: payment?.amount || school.subscribePrice || 0,
+      status: payment?.status || 'unpaid',
+    };
   }
 
   async schoolPraymentSub(schoolId: string) {
