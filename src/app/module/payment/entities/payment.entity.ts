@@ -33,12 +33,57 @@ export class Payment {
   @Prop()
   amount!: number;
 
+  @Prop()
+  totalStudents!: number;
+
+  @Prop()
+  perStudentCharge!: number;
+
+  @Prop()
+  totalAmount!: number;
+
+  @Prop({
+    type: String,
+    enum: ['first_term', 'second_term', 'third_term', 'full_year'],
+  })
+  paymentPlan!: string;
+
+  @Prop({
+    type: {
+      firstTerm: Date,
+      secondTerm: Date,
+      thirdTerm: Date,
+    },
+    default: {},
+  })
+  termDueDates!: {
+    firstTerm?: Date;
+    secondTerm?: Date;
+    thirdTerm?: Date;
+  };
+
+  @Prop({
+    type: String,
+    enum: ['stripe', 'offline'],
+    default: 'stripe',
+  })
+  paymentMethod!: string;
+
+  @Prop()
+  offlinePaymentNote!: string;
+
+  @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' })
+  approvedBy!: Types.ObjectId;
+
+  @Prop()
+  approvedAt!: Date;
+
   @Prop({ default: 'booking' })
   paymentType!: string;
 
   @Prop({
     type: String,
-    enum: ['pending', 'completed', 'failed', 'refunded'],
+    enum: ['pending', 'offline_pending', 'completed', 'failed', 'refunded'],
     default: 'pending',
   })
   status!: string;

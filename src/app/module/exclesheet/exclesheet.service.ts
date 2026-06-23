@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Exclesheet, ExclesheetDocument } from './entities/exclesheet.entity';
 import { Model } from 'mongoose';
 import { User, UserDocument } from '../user/entities/user.entity';
+import { School, SchoolDocument } from '../school/entities/school.entity';
 import * as XLSX from 'xlsx';
 import { IFilterParams } from 'src/app/helpers/pick';
 import paginationHelper, { IOptions } from 'src/app/helpers/pagenation';
@@ -29,6 +30,8 @@ export class ExclesheetService {
     private readonly exclesheetModel: Model<ExclesheetDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    @InjectModel(School.name)
+    private readonly schoolModel: Model<SchoolDocument>,
   ) {}
 
   async uploadStudents(schoolId: string, file: Express.Multer.File) {
@@ -174,6 +177,54 @@ export class ExclesheetService {
     return { data, meta: { page, limit, total } };
   }
 
+  async getStudentsBySchool(
+    schoolId: string,
+    params: IFilterParams,
+    options: IOptions,
+  ) {
+    const school = await this.schoolModel.findById(schoolId).lean();
+    if (!school) throw new HttpException('School not found', 404);
+
+    const assignedUsers = await this.userModel
+      .find({ schoolName: school._id })
+      .select('_id')
+      .lean();
+    const accountIds = Array.from(
+      new Set([
+        ...(school.school || []).map((id) => id.toString()),
+        ...assignedUsers.map((user) => user._id.toString()),
+      ]),
+    );
+
+    const { limit, page, skip, sortBy, sortOrder } = paginationHelper(options);
+    const { searchTerm, ...filters } = params;
+    const where: Record<string, any> = { schoolId: { $in: accountIds } };
+
+    if (searchTerm) {
+      where.$or = [
+        { schoolName: { $regex: searchTerm, $options: 'i' } },
+        { lastName: { $regex: searchTerm, $options: 'i' } },
+        { firstName: { $regex: searchTerm, $options: 'i' } },
+        { studentId: { $regex: searchTerm, $options: 'i' } },
+        { gradeLevel: { $regex: searchTerm, $options: 'i' } },
+      ];
+    }
+
+    if (filters.gradeLevel) where.gradeLevel = filters.gradeLevel;
+
+    const [data, total] = await Promise.all([
+      this.exclesheetModel
+        .find(where)
+        .sort({ [sortBy]: sortOrder } as any)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.exclesheetModel.countDocuments(where),
+    ]);
+
+    return { data, meta: { page, limit, total } };
+  }
+
   // ─── 3. DOWNLOAD: MongoDB → Excel buffer ─────────────────────────────────
   async downloadStudents(schoolId: string): Promise<Buffer> {
     const students = await this.exclesheetModel
@@ -217,6 +268,11 @@ export class ExclesheetService {
     const result = await this.exclesheetModel.deleteMany({
       schoolId: schoolId,
     });
+
+    await this.userModel.findByIdAndUpdate(schoolId, {
+      $set: { studentList: [] },
+    });
+
     return { deleted: result.deletedCount };
   }
 

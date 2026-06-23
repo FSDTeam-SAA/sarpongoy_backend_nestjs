@@ -25,6 +25,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import AuthGuard from 'src/app/middlewares/auth.guard';
+import { SchoolPaymentAccessGuard } from 'src/app/middlewares/school-payment-access.guard';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import pick from 'src/app/helpers/pick';
@@ -176,7 +177,7 @@ export class UserController {
   })
   @ApiBearerAuth('access-token')
   @ApiConsumes('multipart/form-data')
-  @UseGuards(AuthGuard(UserRole.ADMIN, UserRole.SCHOOL))
+  @UseGuards(AuthGuard(UserRole.ADMIN, UserRole.SCHOOL), SchoolPaymentAccessGuard)
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'schoolLogo', maxCount: 1 },

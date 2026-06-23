@@ -24,6 +24,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import AuthGuard from 'src/app/middlewares/auth.guard';
+import { SchoolPaymentAccessGuard } from 'src/app/middlewares/school-payment-access.guard';
 import { UserRole } from '../user/user-role.enum';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
@@ -38,7 +39,7 @@ export class ExclesheetController {
   @Post('upload')
   @ApiOperation({ summary: 'Upload students from Excel file (.xlsx)' })
   @ApiBearerAuth('access-token')
-  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @UseGuards(AuthGuard(UserRole.SCHOOL), SchoolPaymentAccessGuard)
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -66,7 +67,7 @@ export class ExclesheetController {
   @Get()
   @ApiOperation({ summary: 'Get all students of the logged-in school' })
   @ApiBearerAuth('access-token')
-  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @UseGuards(AuthGuard(UserRole.SCHOOL), SchoolPaymentAccessGuard)
   @ApiQuery({ name: 'searchTerm', required: false, type: String })
   @ApiQuery({ name: 'gradeLevel', required: false, type: String })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -94,11 +95,45 @@ export class ExclesheetController {
     };
   }
 
+  @Get('school/:schoolId')
+  @ApiOperation({ summary: 'Get imported students for a school as admin' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.ADMIN))
+  @ApiQuery({ name: 'searchTerm', required: false, type: String })
+  @ApiQuery({ name: 'gradeLevel', required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    type: String,
+    example: 'createdAt',
+  })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
+  @HttpCode(HttpStatus.OK)
+  async getSchoolStudents(
+    @Param('schoolId') schoolId: string,
+    @Req() req: Request,
+  ) {
+    const filters = pick(req.query, ['searchTerm', 'gradeLevel']);
+    const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
+    const result = await this.exclesheetService.getStudentsBySchool(
+      schoolId,
+      filters,
+      options,
+    );
+    return {
+      message: 'Students fetched successfully',
+      meta: result.meta,
+      data: result.data,
+    };
+  }
+
   // ─── GET /student/download — Download as Excel ────────────────────────
   @Get('download')
   @ApiOperation({ summary: 'Download all students as Excel file' })
   @ApiBearerAuth('access-token')
-  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @UseGuards(AuthGuard(UserRole.SCHOOL), SchoolPaymentAccessGuard)
   async downloadStudents(@Req() req: Request, @Res() res: Response) {
     const buffer = await this.exclesheetService.downloadStudents(req.user!.id);
 
@@ -115,7 +150,7 @@ export class ExclesheetController {
   @Delete()
   @ApiOperation({ summary: 'Delete all students of logged-in school' })
   @ApiBearerAuth('access-token')
-  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @UseGuards(AuthGuard(UserRole.SCHOOL), SchoolPaymentAccessGuard)
   @HttpCode(HttpStatus.OK)
   async deleteAllStudents(@Req() req: Request) {
     const result = await this.exclesheetService.deleteAllStudents(req.user!.id);
@@ -126,7 +161,7 @@ export class ExclesheetController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a single student by ID' })
   @ApiBearerAuth('access-token')
-  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @UseGuards(AuthGuard(UserRole.SCHOOL), SchoolPaymentAccessGuard)
   @HttpCode(HttpStatus.OK)
   async deleteStudent(@Req() req: Request, @Param('id') id: string) {
     const result = await this.exclesheetService.deleteStudent(req.user!.id, id);

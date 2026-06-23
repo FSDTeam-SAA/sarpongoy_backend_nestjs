@@ -16,6 +16,50 @@ export class SchoolService {
     private readonly schoolModel: Model<School>,
   ) {}
 
+  private buildTermConfig(dto: Partial<CreateSchoolDto>) {
+    const dates = {
+      firstTermDueDate: dto.firstTermDueDate,
+      secondTermDueDate: dto.secondTermDueDate,
+      thirdTermDueDate: dto.thirdTermDueDate,
+      fullPaymentDueDate: dto.fullPaymentDueDate,
+    };
+
+    const parsed = Object.entries(dates).reduce<Record<string, Date>>(
+      (result, [key, value]) => {
+        if (!value) return result;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          throw new HttpException(`${key} must be a valid date`, 400);
+        }
+        result[key] = date;
+        return result;
+      },
+      {},
+    );
+
+    const termDates = [
+      parsed.firstTermDueDate,
+      parsed.secondTermDueDate,
+      parsed.thirdTermDueDate,
+    ].filter(Boolean);
+
+    for (let index = 1; index < termDates.length; index += 1) {
+      if (termDates[index] < termDates[index - 1]) {
+        throw new HttpException(
+          'Term due dates must be in chronological order',
+          400,
+        );
+      }
+    }
+
+    delete (dto as Record<string, unknown>).firstTermDueDate;
+    delete (dto as Record<string, unknown>).secondTermDueDate;
+    delete (dto as Record<string, unknown>).thirdTermDueDate;
+    delete (dto as Record<string, unknown>).fullPaymentDueDate;
+
+    return Object.keys(parsed).length ? parsed : undefined;
+  }
+
   async createSchool(createSchoolDto: CreateSchoolDto,file?: Express.Multer.File) {
     const school = await this.schoolModel.findOne({
       name: createSchoolDto.name,
@@ -27,6 +71,8 @@ export class SchoolService {
       const {url} = await fileUpload.uploadToCloudinary(file);
       createSchoolDto.NDA = url;
     }
+    const termConfig = this.buildTermConfig(createSchoolDto);
+    if (termConfig) createSchoolDto['termConfig'] = termConfig;
     const newSchool = await this.schoolModel.create(createSchoolDto);
     return newSchool;
   }
@@ -73,6 +119,8 @@ export class SchoolService {
       const {url} = await fileUpload.uploadToCloudinary(file);
       updateSchoolDto.NDA = url;
     }
+    const termConfig = this.buildTermConfig(updateSchoolDto);
+    if (termConfig) updateSchoolDto['termConfig'] = termConfig;
     const updatedSchool = await this.schoolModel.findByIdAndUpdate(
       id,
       updateSchoolDto,
