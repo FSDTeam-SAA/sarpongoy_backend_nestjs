@@ -59,11 +59,23 @@ export class UserService {
       createUserDto.profilePicture = uploadedFile.url;
     }
     const createdUser = await this.userModel.create(createUserDto);
-    await sendMailer(
-      createdUser.email,
-      'Welcome to our platform',
-      generateWelcomeEmail(createUserDto.email, createUserDto.password),
-    );
+    const welcomeEmail = await generateWelcomeEmail({
+      email: createdUser.email,
+      password: createUserDto.password,
+      schoolName:
+        [createUserDto.firstName, createUserDto.lastName]
+          .filter(Boolean)
+          .join(' ') || createdUser.email,
+    });
+    try {
+      await sendMailer(
+        createdUser.email,
+        'Welcome to iLearnReady',
+        welcomeEmail,
+      );
+    } catch (error) {
+      console.error('Welcome email failed', error);
+    }
     return createdUser;
   }
 

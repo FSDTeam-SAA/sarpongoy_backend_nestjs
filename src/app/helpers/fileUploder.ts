@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
 import path from 'path';
 import { memoryStorage } from 'multer';
 import streamifier from 'streamifier';

@@ -153,7 +153,7 @@ export class GlobalExceptionFilter<T> implements ExceptionFilter {
 
     // 1️0  SyntaxError (bad JSON body)
     else if (err instanceof SyntaxError && 'body' in err) {
-      ({ statusCode, message, errorSources } = handleSyntaxError(err));
+      ({ statusCode, message, errorSources } = handleSyntaxError());
     }
 
     // 11  TypeError / RangeError

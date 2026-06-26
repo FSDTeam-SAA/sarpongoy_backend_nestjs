@@ -1,7 +1,18 @@
 import nodemailer from 'nodemailer';
 import config from '../config';
 
-const sendMailer = async (email: string, subject?: string, html?: string) => {
+type MailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
+
+const sendMailer = async (
+  email: string,
+  subject?: string,
+  html?: string,
+  attachments?: MailAttachment[],
+) => {
   const transporter = nodemailer.createTransport({
     host: config.email.host,
     port: Number(config.email.port),
@@ -12,10 +23,11 @@ const sendMailer = async (email: string, subject?: string, html?: string) => {
     },
   });
   const info = await transporter.sendMail({
-    from: `"ILearnready" ${config.email.from}`,
+    from: `"iLearnReady" ${config.email.from}`,
     to: email,
     subject,
     html,
+    attachments,
   });
 
   console.log('Message sent:', info.messageId);

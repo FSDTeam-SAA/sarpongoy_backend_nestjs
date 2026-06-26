@@ -9,6 +9,7 @@ import * as jwt from '@nestjs/jwt';
 import config from '../../config';
 import sendMailer from 'src/app/helpers/sendMailer';
 import { fileUpload } from 'src/app/helpers/fileUploder';
+import { generateWelcomeEmail } from 'src/app/utils/generateWelcomeEmail';
 
 @Injectable()
 export class AuthService {
@@ -47,7 +48,21 @@ export class AuthService {
       );
       CreateAuthDto.profilePicture = uploadedFile.url;
     }
-    return this.userModel.create(CreateAuthDto);
+    const createdUser = await this.userModel.create(CreateAuthDto);
+    const welcomeEmail = await generateWelcomeEmail({
+      email: createdUser.email,
+      password: CreateAuthDto.password,
+      schoolName:
+        [CreateAuthDto.firstName, CreateAuthDto.lastName]
+          .filter(Boolean)
+          .join(' ') || createdUser.email,
+    });
+    try {
+      await sendMailer(createdUser.email, 'Welcome to iLearnReady', welcomeEmail);
+    } catch (error) {
+      console.error('Welcome email failed', error);
+    }
+    return createdUser;
   }
 
   async login(loginDto: { email: string; password: string }, res: Response) {

@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import config from 'src/app/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import sendMailer from 'src/app/helpers/sendMailer';
 import { Payment, PaymentDocument } from '../payment/entities/payment.entity';
 import {
   PaymentHistory,
@@ -15,6 +16,10 @@ import {
 } from '../subscribe/entities/subscribe.entity';
 import { User, UserDocument } from '../user/entities/user.entity';
 import { School, SchoolDocument } from '../school/entities/school.entity';
+import {
+  generateInvoiceEmail,
+  generateInvoicePdfBuffer,
+} from 'src/app/utils/emailTemplates';
 
 type StripeEvent = ReturnType<
   InstanceType<typeof Stripe>['webhooks']['constructEvent']
@@ -39,6 +44,75 @@ export class WebhookService {
     @InjectModel(PaymentHistory.name)
     private readonly paymentHistoryModel: Model<PaymentHistoryDocument>,
   ) {}
+
+  private buildInvoicePayload(payment: PaymentDocument) {
+    const invoiceNumber = `INV-${payment._id.toString().slice(-8).toUpperCase()}`;
+    const paymentDates = payment as PaymentDocument & {
+      createdAt?: Date;
+      updatedAt?: Date;
+    };
+
+    return {
+      invoiceNumber,
+      schoolName: payment.schoolName || payment.email || 'School payment',
+      email: payment.email || '',
+      amount: Number(payment.amount || 0),
+      paymentPlan: payment.paymentPlan,
+      paymentMethod: payment.paymentMethod,
+      status: payment.status,
+      totalStudents: Number(payment.totalStudents || 0),
+      perStudentCharge: Number(payment.perStudentCharge || 0),
+      totalAmount: Number(payment.totalAmount || payment.amount || 0),
+      paidAt: payment.approvedAt || paymentDates.updatedAt || paymentDates.createdAt,
+      note:
+        payment.paymentMethod === 'offline'
+          ? 'Offline payment approved by the admin team.'
+          : 'Stripe confirmed this payment automatically.',
+    };
+  }
+
+  private async sendPaymentReceipt(payment: PaymentDocument) {
+    if (!payment.email) return;
+
+    try {
+      const invoice = this.buildInvoicePayload(payment);
+      const html = await generateInvoiceEmail(invoice);
+
+      let attachments:
+        | { filename: string; content: Buffer; contentType: string }[]
+        | undefined;
+
+      try {
+        const pdf = await generateInvoicePdfBuffer(invoice);
+        attachments = [
+          {
+            filename: `${invoice.invoiceNumber}.pdf`,
+            content: pdf,
+            contentType: 'application/pdf',
+          },
+        ];
+      } catch (error) {
+        this.logger.error(
+          `Invoice PDF generation failed for ${payment._id.toString()}: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
+        );
+      }
+
+      await sendMailer(
+        payment.email,
+        `Payment invoice - ${invoice.invoiceNumber}`,
+        html,
+        attachments,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Payment receipt email failed for ${payment._id.toString()}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+    }
+  }
 
   private async createSchoolPaymentHistory(
     payment: PaymentDocument,
@@ -169,6 +243,7 @@ export class WebhookService {
         user.schoolName = school._id;
         await user.save();
       }
+      await this.sendPaymentReceipt(payment);
       return;
     }
 
@@ -194,6 +269,7 @@ export class WebhookService {
         user.subscriptionExpiry = expireDate;
         await user.save();
       }
+      await this.sendPaymentReceipt(payment);
     }
   }
 

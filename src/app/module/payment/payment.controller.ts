@@ -10,8 +10,9 @@ import {
   Patch,
   HttpCode,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -233,6 +234,30 @@ export class PaymentController {
       message: 'School payment overview retrieved successfully',
       data: result,
     };
+  }
+
+  @Get(':id/invoice')
+  @ApiOperation({ summary: 'Download payment invoice PDF' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.ADMIN, UserRole.SCHOOL))
+  @HttpCode(HttpStatus.OK)
+  async downloadPaymentInvoice(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const invoice = await this.paymentService.getPaymentInvoice(
+      req.user!.id,
+      req.user!.role,
+      id,
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${invoice.filename}"`,
+    );
+    res.send(invoice.buffer);
   }
 
   @Get(':id')

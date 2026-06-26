@@ -8,7 +8,6 @@ import {
   Get,
   Req,
   Param,
-  Patch,
   Delete,
   Put,
   UseInterceptors,
@@ -28,7 +27,7 @@ import AuthGuard from 'src/app/middlewares/auth.guard';
 import { UserRole } from '../user/user-role.enum';
 import type { Request } from 'express';
 import pick from 'src/app/helpers/pick';
-import { AnyFilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { fileUpload } from 'src/app/helpers/fileUploder';
 
 @ApiTags('School')
