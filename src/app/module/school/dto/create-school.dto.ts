@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsInt, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateSchoolDto {
   @ApiPropertyOptional({ example: 'School Name' })
@@ -8,8 +9,22 @@ export class CreateSchoolDto {
   name!: string;
 
   @ApiPropertyOptional({ example: 100 })
-  @IsInt()
+  @Type(() => Number)
+  @IsNumber()
   subscribePrice?: number;
+
+  @ApiPropertyOptional({ example: 500 })
+  @Type(() => Number)
+  @IsInt()
+  totalStudent?: number;
+
+  @ApiPropertyOptional({
+    example:
+      '[{"termId":"term_1","label":"Term 1","amount":12000,"dueDate":"2026-09-01"}]',
+  })
+  @IsOptional()
+  @IsString()
+  paymentTerms?: string;
 
   @ApiPropertyOptional({
     example: 'School contract file',

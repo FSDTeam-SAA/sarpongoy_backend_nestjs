@@ -14,8 +14,6 @@ import {
   UploadedFile,
 } from '@nestjs/common';
 import { SchoolService } from './school.service';
-import { CreateSchoolDto } from './dto/create-school.dto';
-import { UpdateSchoolDto } from './dto/update-school.dto';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -45,8 +43,8 @@ export class SchoolController {
   @UseGuards(AuthGuard(UserRole.ADMIN))
   @UseInterceptors(FileInterceptor('NDA', fileUpload.uploadConfig))
   @HttpCode(HttpStatus.CREATED)
-  async createSchool(@Body() createSchoolDto: CreateSchoolDto, @UploadedFile() file?: Express.Multer.File) {
-    const result = await this.schoolService.createSchool(createSchoolDto, file);
+  async createSchool(@Body() createSchoolDto: Record<string, any>, @UploadedFile() file?: Express.Multer.File) {
+    const result = await this.schoolService.createSchool(createSchoolDto as any, file);
     return {
       message: 'School created successfully',
       data: result,
@@ -102,10 +100,10 @@ export class SchoolController {
   @HttpCode(HttpStatus.OK)
   async updateSchool(
     @Param('id') id: string,
-    @Body() updateSchoolDto: UpdateSchoolDto,
+    @Body() updateSchoolDto: Record<string, any>,
     @UploadedFile() file?: Express.Multer.File
   ) {
-    const result = await this.schoolService.updateSchool(id, updateSchoolDto, file);
+    const result = await this.schoolService.updateSchool(id, updateSchoolDto as any, file);
     return {
       message: 'School updated successfully',
       data: result,

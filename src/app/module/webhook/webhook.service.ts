@@ -126,6 +126,8 @@ export class WebhookService {
       schoolId: payment.schoolId,
       userId: payment.userId,
       paymentPlan: payment.paymentPlan || 'full_year',
+      termId: payment.termId,
+      termLabel: payment.termLabel,
       paymentMethod: payment.paymentMethod || 'stripe',
       status,
       amount: payment.amount || 0,
@@ -234,8 +236,9 @@ export class WebhookService {
       if (!alreadyInSchool) {
         school.school = schoolMembers;
         school.school.push(payment.userId);
-        await school.save();
       }
+      if (!school.termsLocked) school.termsLocked = true;
+      await school.save();
 
       // User এর schoolName update করো
       const user = await this.userModel.findById(payment.userId);

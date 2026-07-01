@@ -21,13 +21,37 @@ export class TermConfiguration {
 export const TermConfigurationSchema =
   SchemaFactory.createForClass(TermConfiguration);
 
+@Schema({ _id: false })
+export class SchoolPaymentTerm {
+  @Prop({ required: true })
+  termId!: string;
+
+  @Prop({ required: true })
+  label!: string;
+
+  @Prop({ required: true })
+  amount!: number;
+
+  @Prop()
+  dueDate?: string;
+}
+
+export const SchoolPaymentTermSchema =
+  SchemaFactory.createForClass(SchoolPaymentTerm);
+
 @Schema({ timestamps: true })
 export class School {
   @Prop({ required: true })
   name!: string;
 
-  @Prop()
+  @Prop({ default: 0 })
   subscribePrice!: number;
+
+  @Prop({ default: 0 })
+  totalStudent!: number;
+
+  @Prop({ default: 0 })
+  totalContractAmount!: number;
 
   @Prop()
   NDA!: string;
@@ -35,22 +59,19 @@ export class School {
   @Prop({ type: TermConfigurationSchema, default: {} })
   termConfig!: TermConfiguration;
 
+  @Prop({ type: [SchoolPaymentTermSchema], default: [] })
+  paymentTerms!: SchoolPaymentTerm[];
+
+  @Prop({ default: false })
+  termsLocked!: boolean;
+
   @Prop({
     enum: ['active', 'restricted'],
     default: 'active',
   })
   paymentAccessStatus!: string;
 
-  @Prop({
-    enum: [
-      'none',
-      'first_term',
-      'second_term',
-      'third_term',
-      'full_payment',
-    ],
-    default: 'none',
-  })
+  @Prop({ default: 'none' })
   overdueTerm!: string;
 
   @Prop()

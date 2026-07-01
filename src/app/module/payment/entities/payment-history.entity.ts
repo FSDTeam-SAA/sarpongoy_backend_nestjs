@@ -17,11 +17,14 @@ export class PaymentHistory {
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' })
   changedBy?: Types.ObjectId;
 
-  @Prop({
-    enum: ['full_year', 'first_term', 'second_term', 'third_term'],
-    required: true,
-  })
+  @Prop({ required: true })
   paymentPlan!: string;
+
+  @Prop()
+  termId?: string;
+
+  @Prop()
+  termLabel?: string;
 
   @Prop({ enum: ['stripe', 'offline', 'system'], default: 'system' })
   paymentMethod!: string;

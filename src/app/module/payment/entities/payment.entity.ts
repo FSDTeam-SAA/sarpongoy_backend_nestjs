@@ -42,11 +42,14 @@ export class Payment {
   @Prop()
   totalAmount!: number;
 
-  @Prop({
-    type: String,
-    enum: ['first_term', 'second_term', 'third_term', 'full_year'],
-  })
+  @Prop()
   paymentPlan!: string;
+
+  @Prop()
+  termId!: string;
+
+  @Prop()
+  termLabel!: string;
 
   @Prop({
     type: {

@@ -58,7 +58,8 @@ export class PaymentController {
     @Param('schoolId') schoolId: string,
     @Body()
     body: {
-      paymentPlan?: 'first_term' | 'second_term' | 'third_term' | 'full_year';
+      paymentPlan?: string;
+      termId?: string;
       forceNew?: boolean;
       termDueDates?: {
         firstTerm?: string;
@@ -88,7 +89,8 @@ export class PaymentController {
     @Param('schoolId') schoolId: string,
     @Body()
     body: {
-      paymentPlan?: 'first_term' | 'second_term' | 'third_term' | 'full_year';
+      paymentPlan?: string;
+      termId?: string;
       termDueDates?: {
         firstTerm?: string;
         secondTerm?: string;

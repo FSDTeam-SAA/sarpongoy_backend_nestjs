@@ -10,8 +10,8 @@ export type SchoolPaymentStatus = {
   hasFullAccess: boolean;
   hasConfiguredDueDate: boolean;
   isRestricted: boolean;
-  activeTerm: 'first_term' | 'second_term' | 'third_term' | 'full_payment' | 'none';
-  overdueTerm: 'first_term' | 'second_term' | 'third_term' | 'full_payment' | 'none';
+  activeTerm: string;
+  overdueTerm: string;
   reason: string;
 };
 
@@ -20,6 +20,15 @@ type TermConfig = {
   secondTermDueDate?: Date | string;
   thirdTermDueDate?: Date | string;
   fullPaymentDueDate?: Date | string;
+  paymentTerms?: Array<{
+    termId?: string;
+    label?: string;
+    amount?: number;
+    amountPaid?: number;
+    remainingDue?: number;
+    dueDate?: Date | string;
+    status?: string;
+  }>;
 };
 
 type PaymentLike = {
@@ -66,11 +75,62 @@ const hasTermWisePayment = (payments: PaymentLike[]) =>
 
 const hasAnyConfiguredDueDate = (termConfig: TermConfig = {}) =>
   Boolean(
+    termConfig.paymentTerms?.some((term) => parseDate(term.dueDate)) ||
     parseDate(termConfig.firstTermDueDate) ||
       parseDate(termConfig.secondTermDueDate) ||
       parseDate(termConfig.thirdTermDueDate) ||
       parseDate(termConfig.fullPaymentDueDate),
   );
+
+const getDynamicStatus = (
+  termConfig: TermConfig,
+  hasConfiguredDueDate: boolean,
+  now: Date,
+) => {
+  const terms = termConfig.paymentTerms || [];
+  if (!terms.length) return null;
+
+  const today = startOfDay(now);
+  const unpaid = terms.filter((term) => Number(term.remainingDue ?? term.amount ?? 0) > 0);
+
+  if (!unpaid.length) {
+    return {
+      hasFullAccess: true,
+      hasConfiguredDueDate,
+      isRestricted: false,
+      activeTerm: 'none' as const,
+      overdueTerm: 'none' as const,
+      reason: 'All payment terms are fully paid',
+    };
+  }
+
+  const overdue = unpaid.find((term) => {
+    const dueDate = parseDate(term.dueDate);
+    return dueDate && today > dueDate;
+  });
+
+  if (overdue) {
+    const termId = (overdue.termId || 'term_due') as SchoolPaymentStatus['activeTerm'];
+    return {
+      hasFullAccess: false,
+      hasConfiguredDueDate,
+      isRestricted: true,
+      activeTerm: termId,
+      overdueTerm: termId,
+      reason: `${overdue.label || overdue.termId || 'Payment term'} payment is overdue`,
+    };
+  }
+
+  const active = unpaid.find((term) => parseDate(term.dueDate)) || unpaid[0];
+  return {
+    hasFullAccess: false,
+    hasConfiguredDueDate,
+    isRestricted: false,
+    activeTerm: (active.termId || 'none') as SchoolPaymentStatus['activeTerm'],
+    overdueTerm: 'none' as const,
+    reason: hasConfiguredDueDate ? 'Payment due date is configured' : 'Payment terms are pending',
+  };
+};
 
 const getNextConfiguredTerm = (termConfig: TermConfig, payments: PaymentLike[]) => {
   const nextTerm = TERM_SEQUENCE.find(
@@ -102,6 +162,10 @@ export function calculateSchoolPaymentStatus(
       reason: 'Full school year payment completed',
     };
   }
+
+  const dynamicStatus = getDynamicStatus(termConfig, hasConfiguredDueDate, now);
+
+  if (dynamicStatus) return dynamicStatus;
 
   if (!hasConfiguredDueDate) {
     return {

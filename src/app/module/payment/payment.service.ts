@@ -26,14 +26,11 @@ import {
   generateInvoicePdfBuffer,
 } from 'src/app/utils/emailTemplates';
 
-type SchoolPaymentPlan =
-  | 'first_term'
-  | 'second_term'
-  | 'third_term'
-  | 'full_year';
+type SchoolPaymentPlan = string;
 
 type SchoolPaymentRequest = {
   paymentPlan?: SchoolPaymentPlan;
+  termId?: string;
   forceNew?: boolean;
   termDueDates?: {
     firstTerm?: string;
@@ -43,12 +40,14 @@ type SchoolPaymentRequest = {
   offlinePaymentNote?: string;
 };
 
-const TERM_PAYMENT_PLANS: SchoolPaymentPlan[] = [
-  'first_term',
-  'second_term',
-  'third_term',
-];
-const DEFAULT_SCHOOL_PAYMENT_PLAN: SchoolPaymentPlan = 'full_year';
+const DEFAULT_SCHOOL_PAYMENT_PLAN: SchoolPaymentPlan = 'term_1';
+
+type SchoolPaymentTerm = {
+  termId?: string;
+  label?: string;
+  amount?: number;
+  dueDate?: Date | string;
+};
 
 type SchoolPaymentSummaryHistory = {
   _id: string;
@@ -197,6 +196,8 @@ export class PaymentService {
       userId: payment.userId,
       changedBy: changedBy ? new Types.ObjectId(changedBy) : undefined,
       paymentPlan: payment.paymentPlan || 'full_year',
+      termId: payment.termId,
+      termLabel: payment.termLabel,
       paymentMethod: payment.paymentMethod || 'stripe',
       status,
       amount: payment.amount || 0,
@@ -284,35 +285,23 @@ export class PaymentService {
   }
 
   private getSchoolPaymentPlan(value?: string): SchoolPaymentPlan {
-    if (
-      value === 'first_term' ||
-      value === 'second_term' ||
-      value === 'third_term' ||
-      value === 'full_year'
-    ) {
-      return value;
-    }
-
-    return DEFAULT_SCHOOL_PAYMENT_PLAN;
+    return value || DEFAULT_SCHOOL_PAYMENT_PLAN;
   }
 
-  private getSchoolPaymentAmounts(
-    user: UserDocument,
-    school: SchoolDocument,
-    paymentPlan: SchoolPaymentPlan,
-    paidAmount = 0,
-  ) {
-    const totalStudents = Number(user.totalStudent || 0);
+  private toMoney(value: unknown) {
+    return Number(Number(value || 0).toFixed(2));
+  }
+
+  private startOfDay(date: Date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  private getContractTotals(user: UserDocument, school: SchoolDocument) {
+    const totalStudents = Number(school.totalStudent || user.totalStudent || 0);
     const perStudentCharge = Number(school.subscribePrice || 0);
-    const totalAmount = Number((totalStudents * perStudentCharge).toFixed(2));
-    const termAmount = Number((totalAmount / 3).toFixed(2));
-    const balanceDue = Math.max(
-      0,
-      Number((totalAmount - Number(paidAmount || 0)).toFixed(2)),
+    const totalAmount = this.toMoney(
+      school.totalContractAmount || totalStudents * perStudentCharge,
     );
-    const amount = TERM_PAYMENT_PLANS.includes(paymentPlan)
-      ? Math.min(termAmount, balanceDue || termAmount)
-      : balanceDue || totalAmount;
 
     if (totalStudents <= 0) {
       throw new HttpException('This school does not have total students set', 400);
@@ -329,49 +318,72 @@ export class PaymentService {
       totalStudents,
       perStudentCharge,
       totalAmount,
-      amount,
     };
   }
 
-  private async getCompletedSchoolPayments(
+  private buildDefaultTerms(totalAmount: number): SchoolPaymentTerm[] {
+    const totalCents = Math.round(totalAmount * 100);
+    const base = Math.floor(totalCents / 3);
+    const remainder = totalCents - base * 3;
+
+    return [0, 1, 2].map((index) => ({
+      termId: `term_${index + 1}`,
+      label: `Term ${index + 1}`,
+      amount: this.toMoney((base + (index < remainder ? 1 : 0)) / 100),
+    }));
+  }
+
+  private getCompletedTermTotal(payments: PaymentDocument[] | any[], termId: string) {
+    return this.toMoney(
+      payments
+        .filter(
+          (payment) =>
+            payment.status === 'completed' &&
+            (payment.termId || payment.paymentPlan) === termId,
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+    );
+  }
+
+  private getTermPaymentDetails(
+    user: UserDocument,
+    school: SchoolDocument,
+    termId: string,
+    payments: PaymentDocument[] | any[],
+  ) {
+    const totals = this.getContractTotals(user, school);
+    const terms = this.getSchoolTermBreakdown(school, payments);
+    const term = terms.find((item) => item.termId === termId);
+
+    if (!term) throw new HttpException('Please select a valid payment term', 400);
+
+    const termAmount = this.toMoney(term.amount);
+    const remainingDue = this.toMoney(term.remainingDue);
+
+    if (remainingDue <= 0) {
+      throw new HttpException(`${term.label || termId} is already fully paid`, 400);
+    }
+
+    return {
+      ...totals,
+      amount: remainingDue,
+      termId,
+      termLabel: term.label || termId,
+      termAmount,
+      remainingDue,
+      dueDate: term.dueDate,
+    };
+  }
+
+  private async getSchoolPayments(
     userId: Types.ObjectId | string,
     schoolId: Types.ObjectId | string,
   ) {
     return this.paymentModel.find({
       userId,
       schoolId,
-      status: 'completed',
       paymentType: 'school',
     });
-  }
-
-  private getCompletedPaymentTotal(payments: PaymentDocument[]) {
-    return payments.reduce(
-      (sum, payment) => sum + Number(payment.amount || 0),
-      0,
-    );
-  }
-
-  private assertSchoolPaymentIsDue(
-    paymentPlan: SchoolPaymentPlan,
-    completedPayments: PaymentDocument[],
-    totalAmount: number,
-  ) {
-    const paidPlans = new Set(
-      completedPayments.map((payment) => payment.paymentPlan),
-    );
-    const paidAmount = this.getCompletedPaymentTotal(completedPayments);
-
-    if (paidPlans.has('full_year') || paidAmount >= totalAmount) {
-      throw new HttpException('This school subscription is already paid', 400);
-    }
-
-    if (TERM_PAYMENT_PLANS.includes(paymentPlan) && paidPlans.has(paymentPlan)) {
-      throw new HttpException(
-        `${paymentPlan.replace(/_/g, ' ')} payment is already paid`,
-        400,
-      );
-    }
   }
 
   private getSchoolTermDueDates(school: SchoolDocument) {
@@ -395,13 +407,93 @@ export class PaymentService {
     if (!alreadyInSchool) {
       school.school = schoolMembers;
       school.school.push(payment.userId);
-      await school.save();
     }
+
+    if (!school.termsLocked) school.termsLocked = true;
+    await school.save();
 
     const user = await this.userModel.findById(payment.userId);
     if (user) {
       user.schoolName = school._id;
       await user.save();
+    }
+  }
+
+  private async lockSchoolTerms(school: SchoolDocument) {
+    if (school.termsLocked) return;
+    school.termsLocked = true;
+    await school.save();
+  }
+
+  private assertUserCanPaySchool(user: UserDocument, school: SchoolDocument) {
+    const assignedSchoolId = user.schoolName?.toString?.() || '';
+    if (assignedSchoolId !== school._id.toString()) {
+      throw new HttpException('Forbidden', 403);
+    }
+  }
+
+  private async sendSchoolPaymentReminder(
+    school: SchoolDocument,
+    subject: string,
+    message: string,
+  ) {
+    const users = await this.userModel
+      .find({ schoolName: school._id })
+      .select('email')
+      .lean();
+    const recipients = users.map((user) => user.email).filter(Boolean);
+
+    await Promise.all(
+      recipients.map((email) =>
+        sendMailer(
+          email,
+          subject,
+          `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
+            <h2 style="margin:0 0 12px;color:#063D5B">School payment reminder</h2>
+            <p>${message}</p>
+            <p>Please complete the payment from your iLearnReady payment page.</p>
+          </div>`,
+        ).catch((error) =>
+          this.logger.error(
+            `Payment reminder email failed for ${email}: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`,
+          ),
+        ),
+      ),
+    );
+  }
+
+  private getReminderLeadDays(dueDateValue: Date | string | undefined, now: Date) {
+    if (!dueDateValue) return null;
+
+    const dueDate = new Date(dueDateValue);
+    if (Number.isNaN(dueDate.getTime())) return null;
+
+    const daysUntilDue = Math.round(
+      (this.startOfDay(dueDate).getTime() - this.startOfDay(now).getTime()) /
+        (24 * 60 * 60 * 1000),
+    );
+
+    return daysUntilDue === 14 || daysUntilDue === 3 ? daysUntilDue : null;
+  }
+
+  private async sendDueDateReminders(
+    school: SchoolDocument,
+    paymentTerms: ReturnType<PaymentService['getSchoolTermBreakdown']>,
+    now: Date,
+  ) {
+    for (const term of paymentTerms) {
+      if (term.remainingDue <= 0) continue;
+
+      const leadDays = this.getReminderLeadDays(term.dueDate, now);
+      if (!leadDays) continue;
+
+      await this.sendSchoolPaymentReminder(
+        school,
+        `Payment reminder - ${term.label}`,
+        `${term.label} payment of ${term.remainingDue} is due in ${leadDays} days.`,
+      );
     }
   }
 
@@ -415,24 +507,21 @@ export class PaymentService {
 
     const school = await this.schoolModel.findById(schoolId);
     if (!school) throw new HttpException('School not found', 404);
+    this.assertUserCanPaySchool(user, school);
 
-    const paymentPlan = this.getSchoolPaymentPlan(payload.paymentPlan);
+    const termId = payload.termId || payload.paymentPlan;
+    if (!termId) throw new HttpException('Please select a payment term', 400);
+    const paymentPlan = this.getSchoolPaymentPlan(termId);
     const termDueDates = this.getSchoolTermDueDates(school);
-    const completedPayments = await this.getCompletedSchoolPayments(
+    const schoolPayments = await this.getSchoolPayments(
       user._id,
       school._id,
     );
-    const paidAmount = this.getCompletedPaymentTotal(completedPayments);
-    const amounts = this.getSchoolPaymentAmounts(
+    const amounts = this.getTermPaymentDetails(
       user,
       school,
       paymentPlan,
-      paidAmount,
-    );
-    this.assertSchoolPaymentIsDue(
-      paymentPlan,
-      completedPayments,
-      amounts.totalAmount,
+      schoolPayments,
     );
 
     const existingOfflinePending = await this.paymentModel.findOne({
@@ -463,7 +552,7 @@ export class PaymentService {
         );
         const amountMatches =
           existingPending.amount === amounts.amount &&
-          existingPending.paymentPlan === paymentPlan;
+          (existingPending.termId || existingPending.paymentPlan) === paymentPlan;
 
         if (
           amountMatches &&
@@ -477,6 +566,8 @@ export class PaymentService {
             totalStudents: existingPending.totalStudents,
             perStudentCharge: existingPending.perStudentCharge,
             totalAmount: existingPending.totalAmount,
+            termId: existingPending.termId || existingPending.paymentPlan,
+            termLabel: existingPending.termLabel,
           };
         }
       } catch {
@@ -494,6 +585,8 @@ export class PaymentService {
         schoolId: school._id.toString(),
         paymentType: 'school',
         paymentPlan,
+        termId: amounts.termId,
+        termLabel: amounts.termLabel,
         amount: String(amounts.amount),
         totalStudents: String(amounts.totalStudents),
         perStudentCharge: String(amounts.perStudentCharge),
@@ -509,9 +602,12 @@ export class PaymentService {
       existingPending.perStudentCharge = amounts.perStudentCharge;
       existingPending.totalAmount = amounts.totalAmount;
       existingPending.paymentPlan = paymentPlan;
+      existingPending.termId = amounts.termId;
+      existingPending.termLabel = amounts.termLabel;
       existingPending.termDueDates = termDueDates;
       existingPending.paymentMethod = 'stripe';
       await existingPending.save();
+      await this.lockSchoolTerms(school);
       await this.createPaymentHistory(
         existingPending,
         'pending',
@@ -530,6 +626,8 @@ export class PaymentService {
         perStudentCharge: amounts.perStudentCharge,
         totalAmount: amounts.totalAmount,
         paymentPlan,
+        termId: amounts.termId,
+        termLabel: amounts.termLabel,
         termDueDates,
         paymentMethod: 'stripe',
         paymentType: 'school',
@@ -541,6 +639,7 @@ export class PaymentService {
         undefined,
         'Stripe payment intent created',
       );
+      await this.lockSchoolTerms(school);
     }
 
     return {
@@ -560,24 +659,21 @@ export class PaymentService {
 
     const school = await this.schoolModel.findById(schoolId);
     if (!school) throw new HttpException('School not found', 404);
+    this.assertUserCanPaySchool(user, school);
 
-    const paymentPlan = this.getSchoolPaymentPlan(payload.paymentPlan);
+    const termId = payload.termId || payload.paymentPlan;
+    if (!termId) throw new HttpException('Please select a payment term', 400);
+    const paymentPlan = this.getSchoolPaymentPlan(termId);
     const termDueDates = this.getSchoolTermDueDates(school);
-    const completedPayments = await this.getCompletedSchoolPayments(
+    const schoolPayments = await this.getSchoolPayments(
       user._id,
       school._id,
     );
-    const paidAmount = this.getCompletedPaymentTotal(completedPayments);
-    const amounts = this.getSchoolPaymentAmounts(
+    const amounts = this.getTermPaymentDetails(
       user,
       school,
       paymentPlan,
-      paidAmount,
-    );
-    this.assertSchoolPaymentIsDue(
-      paymentPlan,
-      completedPayments,
-      amounts.totalAmount,
+      schoolPayments,
     );
 
     const existingOfflinePending = await this.paymentModel.findOne({
@@ -592,10 +688,13 @@ export class PaymentService {
       existingOfflinePending.perStudentCharge = amounts.perStudentCharge;
       existingOfflinePending.totalAmount = amounts.totalAmount;
       existingOfflinePending.paymentPlan = paymentPlan;
+      existingOfflinePending.termId = amounts.termId;
+      existingOfflinePending.termLabel = amounts.termLabel;
       existingOfflinePending.termDueDates = termDueDates;
       existingOfflinePending.offlinePaymentNote =
         payload.offlinePaymentNote?.trim() || existingOfflinePending.offlinePaymentNote;
       await existingOfflinePending.save();
+      await this.lockSchoolTerms(school);
       await this.createPaymentHistory(
         existingOfflinePending,
         'offline_pending',
@@ -615,6 +714,8 @@ export class PaymentService {
       perStudentCharge: amounts.perStudentCharge,
       totalAmount: amounts.totalAmount,
       paymentPlan,
+      termId: amounts.termId,
+      termLabel: amounts.termLabel,
       termDueDates,
       paymentMethod: 'offline',
       offlinePaymentNote: payload.offlinePaymentNote?.trim(),
@@ -627,6 +728,7 @@ export class PaymentService {
       undefined,
       'Offline payment request submitted',
     );
+    await this.lockSchoolTerms(school);
 
     return payment;
   }
@@ -668,6 +770,63 @@ export class PaymentService {
     );
   }
 
+  private getSchoolTermBreakdown(
+    school: SchoolDocument | Record<string, any>,
+    payments: PaymentDocument[] | any[],
+  ) {
+    const totalAmount = this.toMoney(
+      school.totalContractAmount ||
+        Number(school.totalStudent || 0) * Number(school.subscribePrice || 0),
+    );
+    const terms = ((school.paymentTerms || []) as SchoolPaymentTerm[]).length
+      ? (school.paymentTerms || [])
+      : this.buildDefaultTerms(totalAmount);
+    const legacyDates = {
+      firstTerm: school.termConfig?.firstTermDueDate,
+      secondTerm: school.termConfig?.secondTermDueDate,
+      thirdTerm: school.termConfig?.thirdTermDueDate,
+    };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return terms.map((term: SchoolPaymentTerm, index: number) => {
+      const termId = term.termId || `term_${index + 1}`;
+      const amount = this.toMoney(term.amount);
+      const paid = this.getCompletedTermTotal(payments, termId);
+      const remainingDue = this.toMoney(Math.max(0, amount - paid));
+      const dueDateValue =
+        term.dueDate ||
+        (index === 0
+          ? legacyDates.firstTerm
+          : index === 1
+            ? legacyDates.secondTerm
+            : legacyDates.thirdTerm);
+      const dueDate = dueDateValue ? new Date(dueDateValue) : null;
+      const isOverdue =
+        Boolean(dueDate) &&
+        !Number.isNaN(dueDate?.getTime()) &&
+        today > new Date(dueDate!.getFullYear(), dueDate!.getMonth(), dueDate!.getDate()) &&
+        remainingDue > 0;
+
+      return {
+        termId,
+        label: term.label || `Term ${index + 1}`,
+        amount,
+        amountPaid: paid,
+        remainingDue,
+        dueDate: dueDateValue,
+        status:
+          remainingDue <= 0
+            ? 'paid'
+            : paid > 0
+              ? 'partial'
+              : isOverdue
+                ? 'overdue'
+                : 'pending',
+      };
+    });
+  }
+
   async getAllSchoolPaymentStatuses() {
     const [schools, payments] = await Promise.all([
       this.schoolModel.find().populate('school', 'email totalStudent').lean(),
@@ -682,8 +841,10 @@ export class PaymentService {
         payments as PaymentDocument[],
         school._id,
       );
+      const paymentTerms = this.getSchoolTermBreakdown(school, schoolPayments);
+
       const status = calculateSchoolPaymentStatus(
-        school.termConfig || {},
+        { ...(school.termConfig || {}), paymentTerms },
         schoolPayments,
       );
       const latestPayment = schoolPayments[0];
@@ -691,12 +852,15 @@ export class PaymentService {
       return {
         schoolId: school._id,
         schoolName: school.name,
-        totalStudents: (school.school || []).reduce(
+        totalStudents: school.totalStudent || (school.school || []).reduce(
           (total: number, member: any) =>
             total + Number(member?.totalStudent || 0),
           0,
         ),
         perStudentCharge: school.subscribePrice || 0,
+        totalContractAmount: school.totalContractAmount || 0,
+        paymentTerms,
+        termsLocked: Boolean(school.termsLocked || schoolPayments.length),
         activeTerm: status.activeTerm,
         overdueTerm: status.overdueTerm,
         isRestricted: status.isRestricted,
@@ -708,6 +872,8 @@ export class PaymentService {
               amount: latestPayment.amount,
               status: latestPayment.status,
               paymentPlan: latestPayment.paymentPlan,
+              termId: latestPayment.termId,
+              termLabel: latestPayment.termLabel,
               paymentMethod: latestPayment.paymentMethod,
             }
           : null,
@@ -754,8 +920,11 @@ export class PaymentService {
     let updated = 0;
     for (const school of schools) {
       const schoolPayments = this.getPaymentsForSchool(payments, school._id);
+      const paymentTerms = this.getSchoolTermBreakdown(school, schoolPayments);
+      await this.sendDueDateReminders(school, paymentTerms, now);
+
       const status = calculateSchoolPaymentStatus(
-        school.termConfig || {},
+        { ...(school.termConfig || {}), paymentTerms },
         schoolPayments,
         now,
       );
@@ -774,15 +943,18 @@ export class PaymentService {
         if (status.isRestricted && status.overdueTerm !== 'none') {
           await this.paymentHistoryModel.create({
             schoolId: school._id,
-            paymentPlan:
-              status.overdueTerm === 'full_payment'
-                ? 'full_year'
-                : status.overdueTerm,
+            paymentPlan: status.overdueTerm,
+            termId: status.overdueTerm,
             paymentMethod: 'system',
             status: 'overdue',
             amount: 0,
             note: status.reason,
           });
+          await this.sendSchoolPaymentReminder(
+            school,
+            `Payment overdue - ${status.overdueTerm}`,
+            status.reason,
+          );
         }
       }
     }
@@ -815,7 +987,7 @@ export class PaymentService {
       .limit(limit)
       .sort({ [sortBy]: sortOrder } as never)
       .populate('userId', 'email schoolName totalStudent')
-      .populate('schoolId', 'name school subscribePrice')
+      .populate('schoolId', 'name school subscribePrice totalStudent totalContractAmount paymentTerms termsLocked')
       .populate('subscribeId');
 
     return { meta: { page, limit, total }, data };
@@ -825,7 +997,7 @@ export class PaymentService {
     const payment = await this.paymentModel
       .findById(id)
       .populate('userId', 'email schoolName totalStudent')
-      .populate('schoolId', 'name school subscribePrice')
+      .populate('schoolId', 'name school subscribePrice totalStudent totalContractAmount paymentTerms termsLocked')
       .populate('subscribeId');
 
     if (!payment) throw new HttpException('Payment not found', 404);
@@ -842,8 +1014,9 @@ export class PaymentService {
       paymentType: 'school',
     });
     const payment = payments.find((item) => item.status === 'completed');
+    const paymentTerms = this.getSchoolTermBreakdown(school, payments);
     const status = calculateSchoolPaymentStatus(
-      school.termConfig || {},
+      { ...(school.termConfig || {}), paymentTerms },
       payments,
     );
     const hasPaymentAccess =
@@ -858,6 +1031,7 @@ export class PaymentService {
       reason: status.reason,
       schoolId: school._id,
       amount: payment?.amount || school.subscribePrice || 0,
+      paymentTerms,
       status: status.isRestricted ? 'restricted' : payment?.status || 'unpaid',
     };
   }
@@ -899,7 +1073,7 @@ export class PaymentService {
       })
       .sort({ createdAt: -1 } as never)
       .populate('userId', 'email totalStudent schoolName')
-      .populate('schoolId', 'name school subscribePrice')
+      .populate('schoolId', 'name school subscribePrice totalStudent totalContractAmount paymentTerms termsLocked')
       .lean();
 
     const histories = await this.paymentHistoryModel
@@ -908,25 +1082,31 @@ export class PaymentService {
         ...(role === UserRole.SCHOOL ? { userId: currentSchoolUser?._id } : {}),
       })
       .sort({ createdAt: -1 } as never)
-      .populate('paymentId', 'amount status paymentPlan paymentMethod totalAmount')
+      .populate('paymentId', 'amount status paymentPlan termId termLabel paymentMethod totalAmount')
       .populate('userId', 'email totalStudent schoolName')
       .populate('changedBy', 'email firstName lastName')
       .lean();
 
     const paymentList = payments as any[];
     const historyList = histories as any[];
-    const status = calculateSchoolPaymentStatus(school.termConfig || {}, paymentList);
-
-    const totalStudents = schoolAccounts.reduce(
+    const accountStudents = schoolAccounts.reduce(
       (total: number, account: any) => total + Number(account?.totalStudent || 0),
       0,
     );
+    const totalStudents = Number(school.totalStudent || accountStudents || 0);
     const perStudentCharge = Number(school.subscribePrice || 0);
-    const totalAmountDue = Number((totalStudents * perStudentCharge).toFixed(2));
+    const totalAmountDue = this.toMoney(
+      school.totalContractAmount || totalStudents * perStudentCharge,
+    );
     const totalCollected = paymentList
       .filter(payment => payment.status === 'completed')
       .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     const balanceDue = Math.max(0, Number((totalAmountDue - totalCollected).toFixed(2)));
+    const paymentTerms = this.getSchoolTermBreakdown(school, paymentList);
+    const status = calculateSchoolPaymentStatus(
+      { ...(school.termConfig || {}), paymentTerms },
+      paymentList,
+    );
     const latestPayment = paymentList[0] || null;
     const latestHistory = historyList[0] || null;
 
@@ -936,6 +1116,8 @@ export class PaymentService {
       school,
       schoolAccounts,
       termConfig: school.termConfig || {},
+      paymentTerms,
+      termsLocked: Boolean(school.termsLocked || paymentList.length),
       paymentAccessStatus: status.isRestricted ? 'restricted' : 'active',
       activeTerm: status.activeTerm,
       overdueTerm: status.overdueTerm,
@@ -953,6 +1135,8 @@ export class PaymentService {
             amount: latestPayment.amount,
             status: latestPayment.status,
             paymentPlan: latestPayment.paymentPlan,
+            termId: latestPayment.termId || latestPayment.paymentPlan,
+            termLabel: latestPayment.termLabel,
             paymentMethod: latestPayment.paymentMethod,
             createdAt: latestPayment.createdAt,
           }
@@ -965,6 +1149,8 @@ export class PaymentService {
                 ? latestHistory.paymentId?._id?.toString?.() || latestHistory.paymentId?._id || ''
                 : latestHistory.paymentId?.toString?.() || latestHistory.paymentId || '',
             paymentPlan: latestHistory.paymentPlan,
+            termId: latestHistory.termId || latestHistory.paymentPlan,
+            termLabel: latestHistory.termLabel,
             paymentMethod: latestHistory.paymentMethod,
             status: latestHistory.status,
             amount: latestHistory.amount,
@@ -978,6 +1164,8 @@ export class PaymentService {
         amount: payment.amount,
         status: payment.status,
         paymentPlan: payment.paymentPlan,
+        termId: payment.termId || payment.paymentPlan,
+        termLabel: payment.termLabel,
         paymentMethod: payment.paymentMethod,
         totalStudents: payment.totalStudents,
         totalAmount: payment.totalAmount,
@@ -994,6 +1182,8 @@ export class PaymentService {
             ? history.paymentId?._id?.toString?.() || history.paymentId?._id || ''
             : history.paymentId?.toString?.() || history.paymentId || '',
         paymentPlan: history.paymentPlan,
+        termId: history.termId || history.paymentPlan,
+        termLabel: history.termLabel,
         paymentMethod: history.paymentMethod,
         status: history.status,
         amount: history.amount,

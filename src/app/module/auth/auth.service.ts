@@ -1,6 +1,7 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { CreateAuthDto } from './dto/create-auth.dto';
 import { User, UserDocument } from '../user/entities/user.entity';
+import { School } from '../school/entities/school.entity';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Response } from 'express';
@@ -15,6 +16,7 @@ import { generateWelcomeEmail } from 'src/app/utils/generateWelcomeEmail';
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(School.name) private readonly schoolModel: Model<School>,
     private readonly jwtService: jwt.JwtService,
   ) {}
 
@@ -49,6 +51,22 @@ export class AuthService {
       CreateAuthDto.profilePicture = uploadedFile.url;
     }
     const createdUser = await this.userModel.create(CreateAuthDto);
+
+    // Add user to school.school array
+    if (CreateAuthDto.schoolName) {
+      try {
+        const schoolDoc = await this.schoolModel.findById(CreateAuthDto.schoolName);
+        if (schoolDoc) {
+          if (!schoolDoc.school?.some((id) => id.toString() === createdUser._id.toString())) {
+            schoolDoc.school = [...(schoolDoc.school || []), createdUser._id];
+            await schoolDoc.save();
+          }
+        }
+      } catch (err) {
+        console.error('Failed to link user to school', err);
+      }
+    }
+
     const welcomeEmail = await generateWelcomeEmail({
       email: createdUser.email,
       password: CreateAuthDto.password,

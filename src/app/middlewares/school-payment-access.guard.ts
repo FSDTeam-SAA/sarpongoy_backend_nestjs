@@ -38,9 +38,43 @@ export class SchoolPaymentAccessGuard implements CanActivate {
       schoolId: school._id,
       paymentType: 'school',
     });
+    const totalAmount =
+      Number(school.totalContractAmount || 0) ||
+      Number(school.totalStudent || user.totalStudent || 0) *
+        Number(school.subscribePrice || 0);
+    const defaultTerms = [0, 1, 2].map((index) => ({
+      termId: `term_${index + 1}`,
+      label: `Term ${index + 1}`,
+      amount: Number((totalAmount / 3).toFixed(2)),
+    }));
+    const configuredTerms = school.paymentTerms?.length
+      ? school.paymentTerms
+      : defaultTerms;
+    const paymentTerms = (configuredTerms as any[]).map(
+      (term, index) => {
+        const termId = term.termId || `term_${index + 1}`;
+        const amountPaid = payments
+          .filter(
+            (payment) =>
+              payment.status === 'completed' &&
+              (payment.termId || payment.paymentPlan) === termId,
+          )
+          .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+        const amount = Number(term.amount || 0);
+
+        return {
+          termId,
+          label: term.label || `Term ${index + 1}`,
+          amount,
+          amountPaid,
+          remainingDue: Math.max(0, Number((amount - amountPaid).toFixed(2))),
+          dueDate: term.dueDate,
+        };
+      },
+    );
 
     const status = calculateSchoolPaymentStatus(
-      school.termConfig || {},
+      { ...(school.termConfig || {}), paymentTerms },
       payments,
     );
 
