@@ -23,6 +23,15 @@ interface ExcelRow {
   grade_level?: string;
 }
 
+const STUDENT_SORT_FIELDS = new Set([
+  'createdAt',
+  'studentId',
+  'gradeLevel',
+]);
+
+const escapeRegex = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 @Injectable()
 export class ExclesheetService {
   constructor(
@@ -145,7 +154,12 @@ export class ExclesheetService {
     params: IFilterParams,
     options: IOptions,
   ) {
-    const { limit, page, skip, sortBy, sortOrder } = paginationHelper(options);
+    const pagination = paginationHelper(options);
+    const { limit, page, skip } = pagination;
+    const sortBy = STUDENT_SORT_FIELDS.has(pagination.sortBy)
+      ? pagination.sortBy
+      : 'createdAt';
+    const sortOrder = pagination.sortOrder === 'asc' ? 'asc' : 'desc';
     const { searchTerm, ...filters } = params;
 
     const where: Record<string, any> = {
@@ -153,28 +167,43 @@ export class ExclesheetService {
     };
 
     if (searchTerm) {
+      const safeSearchTerm = escapeRegex(String(searchTerm).trim());
       where.$or = [
-        { schoolName: { $regex: searchTerm, $options: 'i' } },
-        { lastName: { $regex: searchTerm, $options: 'i' } },
-        { firstName: { $regex: searchTerm, $options: 'i' } },
-        { studentId: { $regex: searchTerm, $options: 'i' } },
-        { gradeLevel: { $regex: searchTerm, $options: 'i' } },
+        { schoolName: { $regex: safeSearchTerm, $options: 'i' } },
+        { lastName: { $regex: safeSearchTerm, $options: 'i' } },
+        { firstName: { $regex: safeSearchTerm, $options: 'i' } },
+        { studentId: { $regex: safeSearchTerm, $options: 'i' } },
+        { gradeLevel: { $regex: safeSearchTerm, $options: 'i' } },
       ];
     }
 
     if (filters.gradeLevel) where.gradeLevel = filters.gradeLevel;
 
-    const [data, total] = await Promise.all([
+    const [data, total, overallTotal, gradeLevels] = await Promise.all([
       this.exclesheetModel
         .find(where)
         .sort({ [sortBy]: sortOrder } as any)
+        .collation({ locale: 'en', strength: 2, numericOrdering: true })
         .skip(skip)
         .limit(limit)
         .lean(),
       this.exclesheetModel.countDocuments(where),
+      this.exclesheetModel.countDocuments({ schoolId }),
+      this.exclesheetModel.distinct('gradeLevel', { schoolId }),
     ]);
 
-    return { data, meta: { page, limit, total } };
+    return {
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        overallTotal,
+        gradeLevels: gradeLevels.filter(Boolean).sort((a, b) =>
+          a.localeCompare(b, undefined, { numeric: true }),
+        ),
+      },
+    };
   }
 
   async getStudentsBySchool(
@@ -196,17 +225,23 @@ export class ExclesheetService {
       ]),
     );
 
-    const { limit, page, skip, sortBy, sortOrder } = paginationHelper(options);
+    const pagination = paginationHelper(options);
+    const { limit, page, skip } = pagination;
+    const sortBy = STUDENT_SORT_FIELDS.has(pagination.sortBy)
+      ? pagination.sortBy
+      : 'createdAt';
+    const sortOrder = pagination.sortOrder === 'asc' ? 'asc' : 'desc';
     const { searchTerm, ...filters } = params;
     const where: Record<string, any> = { schoolId: { $in: accountIds } };
 
     if (searchTerm) {
+      const safeSearchTerm = escapeRegex(String(searchTerm).trim());
       where.$or = [
-        { schoolName: { $regex: searchTerm, $options: 'i' } },
-        { lastName: { $regex: searchTerm, $options: 'i' } },
-        { firstName: { $regex: searchTerm, $options: 'i' } },
-        { studentId: { $regex: searchTerm, $options: 'i' } },
-        { gradeLevel: { $regex: searchTerm, $options: 'i' } },
+        { schoolName: { $regex: safeSearchTerm, $options: 'i' } },
+        { lastName: { $regex: safeSearchTerm, $options: 'i' } },
+        { firstName: { $regex: safeSearchTerm, $options: 'i' } },
+        { studentId: { $regex: safeSearchTerm, $options: 'i' } },
+        { gradeLevel: { $regex: safeSearchTerm, $options: 'i' } },
       ];
     }
 
@@ -216,6 +251,7 @@ export class ExclesheetService {
       this.exclesheetModel
         .find(where)
         .sort({ [sortBy]: sortOrder } as any)
+        .collation({ locale: 'en', strength: 2, numericOrdering: true })
         .skip(skip)
         .limit(limit)
         .lean(),

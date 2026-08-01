@@ -19,6 +19,15 @@ FROM node:20-alpine AS production
 WORKDIR /usr/src/app
 
 ENV NODE_ENV=production
+ENV CHROME_PATH=/usr/bin/chromium-browser
+
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
 
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force

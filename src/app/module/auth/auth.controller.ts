@@ -27,6 +27,7 @@ import {
   ApiOperation,
 } from '@nestjs/swagger';
 import AuthGuard from 'src/app/middlewares/auth.guard';
+import { UserRole } from '../user/user-role.enum';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @Controller('auth')
@@ -121,7 +122,7 @@ export class AuthController {
   }
 
   @Post('change-password')
-  @UseGuards(AuthGuard('user', 'admin'))
+  @UseGuards(AuthGuard(UserRole.ADMIN, UserRole.SCHOOL))
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Change password for logged in user' })
   @ApiBody({ type: ChangePasswordDto })
