@@ -559,13 +559,6 @@ const renderInvoiceFallbackPdfBuffer = (input: InvoiceInput) => {
   writePdfText(content, BRAND_TAGLINE, 72, 668, 10);
 
   writePdfText(content, 'Payment invoice', 72, 612, 22);
-  writePdfText(
-    content,
-    'This PDF was generated without Chrome using the built-in fallback.',
-    72,
-    592,
-    10,
-  );
 
   let y = 550;
   for (const [label, value] of rows) {

@@ -248,7 +248,7 @@ export class PaymentService {
     // Create new payment intent
     const paymentIntent = await this.stripe.paymentIntents.create({
       amount: Math.round(subscribe.price * 100),
-      currency: 'gbp',
+      currency: 'usd',
       automatic_payment_methods: { enabled: true },
       metadata: {
         userId: user._id.toString(),
@@ -556,6 +556,7 @@ export class PaymentService {
 
         if (
           amountMatches &&
+          existingIntent.currency === 'usd' &&
           existingIntent.status !== 'succeeded' &&
           existingIntent.status !== 'canceled'
         ) {
@@ -578,7 +579,7 @@ export class PaymentService {
     // Create new payment intent
     const paymentIntent = await this.stripe.paymentIntents.create({
       amount: Math.round(amounts.amount * 100),
-      currency: 'gbp',
+      currency: 'usd',
       automatic_payment_methods: { enabled: true },
       metadata: {
         userId: user._id.toString(),
