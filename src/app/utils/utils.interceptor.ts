@@ -13,6 +13,9 @@ export class UtilsInterceptor implements NestInterceptor {
     const res = context.switchToHttp().getResponse<Response>();
     return next.handle().pipe(
       map((response) => {
+        // Downloads and webhooks using @Res() already wrote their response.
+        if (res.headersSent || res.writableEnded) return response;
+
         if (
           response &&
           typeof response === 'object' &&
@@ -30,8 +33,8 @@ export class UtilsInterceptor implements NestInterceptor {
         return {
           statusCode: res.statusCode,
           success: res.statusCode >= 200 && res.statusCode < 300,
-          message: response.meta ?? `Request successfully completed`,
-          meta: response.data,
+          message: response?.meta ?? `Request successfully completed`,
+          meta: response?.data,
           data: response,
         };
       }),
