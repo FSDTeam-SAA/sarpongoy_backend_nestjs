@@ -23,6 +23,7 @@ import AuthGuard from 'src/app/middlewares/auth.guard';
 import pick from 'src/app/helpers/pick';
 import { PaymentService } from './payment.service';
 import { UserRole } from '../user/user-role.enum';
+import { ConfirmSchoolPaymentDto, CreatePaymentDto, SchoolPaymentDto } from './dto/create-payment.dto';
 
 @ApiTags('payment')
 @Controller('payment')
@@ -37,10 +38,12 @@ export class PaymentController {
   async paySubscribe(
     @Req() req: Request,
     @Param('subscribeId') subscribeId: string,
+    @Body() body: CreatePaymentDto,
   ) {
     const result = await this.paymentService.paySubscribe(
       req.user!.id,
       subscribeId,
+      body,
     );
     return {
       message: 'Payment intent created successfully',
@@ -57,16 +60,7 @@ export class PaymentController {
     @Req() req: Request,
     @Param('schoolId') schoolId: string,
     @Body()
-    body: {
-      paymentPlan?: string;
-      termId?: string;
-      forceNew?: boolean;
-      termDueDates?: {
-        firstTerm?: string;
-        secondTerm?: string;
-        thirdTerm?: string;
-      };
-    },
+    body: SchoolPaymentDto,
   ) {
     const result = await this.paymentService.paySubscribeSchool(
       req.user!.id,
@@ -79,6 +73,22 @@ export class PaymentController {
     };
   }
 
+  @Post('school/:schoolId/confirm')
+  @ApiOperation({ summary: 'Verify a Stripe payment and complete school payment access' })
+  @ApiBearerAuth('access-token')
+  @UseGuards(AuthGuard(UserRole.SCHOOL))
+  @HttpCode(HttpStatus.OK)
+  async confirmSchoolPayment(
+    @Req() req: Request,
+    @Param('schoolId') schoolId: string,
+    @Body() body: ConfirmSchoolPaymentDto,
+  ) {
+    const data = await this.paymentService.confirmSchoolPayment(
+      req.user!.id, schoolId, body.paymentIntentId,
+    );
+    return { message: 'Payment status verified', data };
+  }
+
   @Post('school/:schoolId/offline')
   @ApiOperation({ summary: 'Request offline school subscription approval' })
   @ApiBearerAuth('access-token')
@@ -88,16 +98,7 @@ export class PaymentController {
     @Req() req: Request,
     @Param('schoolId') schoolId: string,
     @Body()
-    body: {
-      paymentPlan?: string;
-      termId?: string;
-      termDueDates?: {
-        firstTerm?: string;
-        secondTerm?: string;
-        thirdTerm?: string;
-      };
-      offlinePaymentNote?: string;
-    },
+    body: SchoolPaymentDto,
   ) {
     const result = await this.paymentService.requestOfflineSchoolPayment(
       req.user!.id,

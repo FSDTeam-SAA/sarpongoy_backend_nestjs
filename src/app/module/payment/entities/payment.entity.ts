@@ -33,6 +33,16 @@ export class Payment {
   @Prop()
   amount!: number;
 
+  // No default: legacy Stripe records must be reconciled before assuming USD.
+  @Prop({ lowercase: true })
+  currency!: string;
+
+  @Prop()
+  receiptSentAt!: Date;
+
+  @Prop()
+  receiptSendingAt!: Date;
+
   @Prop()
   totalStudents!: number;
 

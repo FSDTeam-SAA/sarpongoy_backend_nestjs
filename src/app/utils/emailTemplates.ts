@@ -13,6 +13,7 @@ type InvoiceInput = {
   schoolName: string;
   email: string;
   amount: number;
+  currency?: string;
   paymentPlan?: string;
   paymentMethod?: string;
   status?: string;
@@ -33,12 +34,13 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const formatCurrency = (amount: number) =>
+const formatCurrency = (amount: number, currency = 'USD') =>
   new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: currency.toUpperCase(),
+    currencyDisplay: 'code',
     minimumFractionDigits: 2,
-  }).format(Number(amount || 0));
+  }).format(Number(amount || 0)).replace(/\u00a0/g, ' ');
 
 const formatDate = (value?: Date | string) => {
   if (!value) return 'N/A';
@@ -413,7 +415,7 @@ const renderInvoiceBody = async (input: InvoiceInput, compact = false) => {
           </div>
           <div class="summary-row total">
             <span>Amount paid</span>
-            <strong>${escapeHtml(formatCurrency(input.amount || 0))}</strong>
+            <strong>${escapeHtml(formatCurrency(input.amount || 0, input.currency))}</strong>
           </div>
         </div>
 
@@ -550,14 +552,16 @@ const renderInvoiceFallbackPdfBuffer = (input: InvoiceInput) => {
     ['Total students', Number(input.totalStudents || 0).toLocaleString()],
     ['Per-student charge', formatCurrency(input.perStudentCharge || 0)],
     ['Calculated total', formatCurrency(input.totalAmount || 0)],
-    ['Amount paid', formatCurrency(input.amount || 0)],
+    ['Amount paid', formatCurrency(input.amount || 0, input.currency)],
   ];
 
   content.push('1 1 1 rg 48 72 516 648 re f');
   content.push('0.02 0.24 0.36 rg 48 650 516 70 re f');
+  content.push('1 1 1 rg');
   writePdfText(content, BRAND_NAME, 72, 690, 24);
   writePdfText(content, BRAND_TAGLINE, 72, 668, 10);
 
+  content.push('0.06 0.09 0.16 rg');
   writePdfText(content, 'Payment invoice', 72, 612, 22);
 
   let y = 550;

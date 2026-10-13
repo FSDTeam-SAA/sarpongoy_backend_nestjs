@@ -2,6 +2,7 @@ import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
+import { isEmail } from 'class-validator';
 import config from 'src/app/config';
 import sendMailer from 'src/app/helpers/sendMailer';
 import { Payment, PaymentDocument } from './entities/payment.entity';
@@ -27,11 +28,13 @@ import {
 } from 'src/app/utils/emailTemplates';
 
 type SchoolPaymentPlan = string;
+export type StripePaymentIntent = Awaited<ReturnType<InstanceType<typeof Stripe>['paymentIntents']['retrieve']>>;
 
 type SchoolPaymentRequest = {
   paymentPlan?: SchoolPaymentPlan;
   termId?: string;
   forceNew?: boolean;
+  billingEmail?: string;
   termDueDates?: {
     firstTerm?: string;
     secondTerm?: string;
@@ -101,6 +104,7 @@ export class PaymentService {
       schoolName: payment.schoolName || payment.email || 'School payment',
       email: payment.email || '',
       amount: Number(payment.amount || 0),
+      currency: payment.currency,
       paymentPlan: payment.paymentPlan,
       paymentMethod: payment.paymentMethod,
       status: payment.status,
@@ -116,10 +120,30 @@ export class PaymentService {
   }
 
   private async sendPaymentReceipt(payment: PaymentDocument) {
-    if (!payment.email) return;
+    if (payment.receiptSentAt) return true;
+    if (!payment.email) return false;
+
+    const lease = new Date();
+    const claimed = await this.paymentModel.findOneAndUpdate(
+      {
+        _id: payment._id,
+        status: 'completed',
+        receiptSentAt: null,
+        $or: [
+          { receiptSendingAt: null },
+          { receiptSendingAt: { $lt: new Date(lease.getTime() - 5 * 60 * 1000) } },
+        ],
+      },
+      { $set: { receiptSendingAt: lease } },
+      { new: true },
+    );
+    if (!claimed) {
+      const current = await this.paymentModel.findById(payment._id);
+      return Boolean(current?.receiptSentAt);
+    }
 
     try {
-      const invoice = this.buildInvoicePayload(payment);
+      const invoice = this.buildInvoicePayload(claimed);
       const html = await generateInvoiceEmail(invoice);
 
       let attachments:
@@ -144,17 +168,27 @@ export class PaymentService {
       }
 
       await sendMailer(
-        payment.email,
+        claimed.email,
         `Payment invoice - ${invoice.invoiceNumber}`,
         html,
         attachments,
       );
+      await this.paymentModel.updateOne(
+        { _id: payment._id, receiptSendingAt: lease },
+        { $set: { receiptSentAt: new Date() }, $unset: { receiptSendingAt: 1 } },
+      );
+      return true;
     } catch (error) {
       this.logger.error(
         `Payment receipt email failed for ${payment._id.toString()}: ${
           error instanceof Error ? error.message : 'Unknown error'
         }`,
       );
+      await this.paymentModel.updateOne(
+        { _id: payment._id, receiptSendingAt: lease },
+        { $unset: { receiptSendingAt: 1 } },
+      );
+      return false;
     }
   }
 
@@ -173,6 +207,17 @@ export class PaymentService {
       throw new HttpException('Forbidden', 403);
     }
 
+    // Older invoices omitted the currency; retrieve it instead of relabeling GBP as USD.
+    if (!payment.currency && payment.stripePaymentIntentId) {
+      const intent = await this.stripe.paymentIntents.retrieve(payment.stripePaymentIntentId);
+      payment.currency = intent.currency;
+      if (intent.status === 'succeeded') payment.amount = intent.amount_received / 100;
+      await this.paymentModel.updateOne(
+        { _id: payment._id },
+        { $set: { currency: payment.currency, amount: payment.amount } },
+        { timestamps: false },
+      );
+    }
     const invoice = this.buildInvoicePayload(payment);
     const buffer = await generateInvoicePdfBuffer(invoice);
 
@@ -205,12 +250,175 @@ export class PaymentService {
     });
   }
 
-  async paySubscribe(userId: string, subscribeId: string) {
+  private getBillingEmail(value: unknown, fallback: string) {
+    const email = typeof value === 'string' ? value.trim() : value === undefined ? fallback?.trim() : '';
+    if (!email || !isEmail(email)) throw new HttpException('Please enter a valid billing email', 400);
+    return email;
+  }
+
+  private getStripeAmount(amount: number) {
+    const cents = Math.round(amount * 100);
+    if (!Number.isSafeInteger(cents) || cents < 50) {
+      throw new HttpException('Payment amount must be at least USD 0.50', 400);
+    }
+    return cents;
+  }
+
+  private async getReusableIntent(
+    payment: PaymentDocument | null,
+    amount: number,
+    billingEmail: string,
+    forceNew = false,
+    termId?: string,
+  ) {
+    if (!payment?.stripePaymentIntentId) return null;
+    let intent: StripePaymentIntent;
+    try {
+      intent = await this.stripe.paymentIntents.retrieve(payment.stripePaymentIntentId);
+    } catch (error) {
+      if ((error as { code?: string }).code === 'resource_missing') return null;
+      throw error;
+    }
+    if (intent.status === 'succeeded') {
+      await this.completeStripePayment(intent);
+      throw new HttpException('This payment is already completed. Please refresh the payment page.', 409);
+    }
+    if (intent.status === 'processing' || intent.status === 'requires_capture') {
+      throw new HttpException('Your previous payment is being processed. Please wait for confirmation.', 409);
+    }
+    const matches = !forceNew && intent.currency === 'usd' &&
+      intent.amount === this.getStripeAmount(amount) &&
+      payment.amount === amount &&
+      (!termId || (payment.termId || payment.paymentPlan) === termId);
+    if (matches && intent.status !== 'canceled') {
+      if (intent.receipt_email !== billingEmail) {
+        intent = await this.stripe.paymentIntents.update(intent.id, { receipt_email: billingEmail });
+      }
+      payment.email = billingEmail;
+      payment.currency = 'usd';
+      payment.status = 'pending';
+      await payment.save();
+      return intent;
+    }
+    // Retire the old client secret before moving the record to a new intent.
+    // If cancellation fails, do not risk a second charge or lose the old ID.
+    if (intent.status !== 'canceled') await this.stripe.paymentIntents.cancel(intent.id);
+    return null;
+  }
+
+  async confirmSchoolPayment(userId: string, schoolId: string, paymentIntentId: string) {
+    if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId || '')) {
+      throw new HttpException('Please provide a valid payment intent', 400);
+    }
+    const payment = await this.paymentModel.findOne({
+      userId, schoolId, stripePaymentIntentId: paymentIntentId, paymentType: 'school',
+    });
+    if (!payment) throw new HttpException('Payment not found', 404);
+    const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+    if (intent.status === 'succeeded') return this.completeStripePayment(intent);
+    return {
+      paymentId: payment._id.toString(), paymentIntentId: intent.id,
+      status: intent.status, amount: intent.amount / 100, currency: intent.currency,
+      billingEmail: payment.email, receiptSent: false,
+    };
+  }
+
+  // Shared by signed webhooks and server-verified browser confirmation.
+  // Fulfillment uses idempotent updates so retries do not extend access again.
+  async completeStripePayment(intent: StripePaymentIntent, requireReceipt = false) {
+    if (intent.status !== 'succeeded') throw new HttpException('Payment has not succeeded', 400);
+    let payment = await this.paymentModel.findOne({ stripePaymentIntentId: intent.id });
+    if (!payment) throw new HttpException('Payment not found', 404);
+    if (payment.status === 'refunded') throw new HttpException('Payment has been refunded', 409);
+    const actualAmount = intent.amount_received / 100;
+    if (!Number.isFinite(actualAmount) || actualAmount <= 0) {
+      throw new HttpException('Stripe did not confirm a captured payment amount', 400);
+    }
+    const billingEmail = intent.receipt_email && isEmail(intent.receipt_email)
+      ? intent.receipt_email : payment.email;
+    const completed = await this.paymentModel.findOneAndUpdate(
+      { _id: payment._id, status: { $nin: ['completed', 'refunded'] } },
+      { $set: {
+        status: 'completed', amount: actualAmount, currency: intent.currency,
+        email: billingEmail, approvedAt: new Date(),
+      } },
+      { new: true },
+    );
+    payment = completed || (await this.paymentModel.findById(payment._id))!;
+    if (payment.status === 'refunded') throw new HttpException('Payment has been refunded', 409);
+    const paidAt = payment.approvedAt || (payment as any).updatedAt || new Date(intent.created * 1000);
+    // Populate missing currency on historical completed records without guessing.
+    await this.paymentModel.updateOne(
+      { _id: payment._id, status: 'completed' },
+      { $set: { amount: actualAmount, currency: intent.currency, email: billingEmail, approvedAt: paidAt } },
+    );
+    payment.amount = actualAmount;
+    payment.currency = intent.currency;
+    payment.email = billingEmail;
+    payment.approvedAt = paidAt;
+
+    if (payment.paymentType === 'school' && payment.schoolId) {
+      await this.schoolModel.updateOne(
+        { _id: payment.schoolId },
+        { $addToSet: { school: payment.userId }, $set: { termsLocked: true } },
+      );
+      await this.userModel.updateOne(
+        { _id: payment.userId }, { $set: { schoolName: payment.schoolId } },
+      );
+      await this.paymentHistoryModel.updateOne(
+        { paymentId: payment._id, status: 'completed', note: 'Stripe payment completed' },
+        { $setOnInsert: {
+          paymentId: payment._id, schoolId: payment.schoolId, userId: payment.userId,
+          paymentPlan: payment.paymentPlan || 'full_year', termId: payment.termId,
+          termLabel: payment.termLabel, paymentMethod: 'stripe', status: 'completed',
+          amount: actualAmount, note: 'Stripe payment completed',
+        } },
+        { upsert: true },
+      );
+    } else if (payment.paymentType === 'subscribe') {
+      const subscribe = await this.subscribeModel.findById(payment.subscribeId);
+      if (!subscribe) throw new HttpException('Subscription not found', 404);
+      const expireDate = new Date(payment.approvedAt || (payment as any).createdAt);
+      expireDate.setMonth(expireDate.getMonth() + Number(subscribe.months));
+      await this.subscribeModel.updateOne(
+        { _id: subscribe._id }, { $addToSet: { subscribeSchools: payment.userId } },
+      );
+      await this.userModel.updateOne(
+        { _id: payment.userId },
+        { $set: { subscription: subscribe._id, subscriptionExpiry: expireDate } },
+      );
+    }
+    const receiptSent = await this.sendPaymentReceipt(payment);
+    if (requireReceipt && !receiptSent) {
+      throw new HttpException('Payment receipt is pending; retry webhook delivery', 503);
+    }
+    return {
+      paymentId: payment._id.toString(), paymentIntentId: intent.id,
+      status: 'completed', amount: actualAmount, currency: intent.currency,
+      billingEmail: payment.email, receiptSent,
+    };
+  }
+
+  async failStripePayment(intent: StripePaymentIntent) {
+    // Failed attempts can be followed by a successful retry on the same intent.
+    // A late failure must never revoke already completed or refunded payment.
+    const payment = await this.paymentModel.findOneAndUpdate(
+      { stripePaymentIntentId: intent.id, status: { $nin: ['completed', 'refunded', 'failed'] } },
+      { $set: { status: 'failed' } },
+      { new: true },
+    );
+    if (payment) await this.createPaymentHistory(payment, 'failed', undefined, 'Stripe payment failed');
+  }
+
+  async paySubscribe(userId: string, subscribeId: string, payload: SchoolPaymentRequest = {}) {
     const user = await this.userModel.findById(userId);
     if (!user) throw new HttpException('User not found', 404);
 
     const subscribe = await this.subscribeModel.findById(subscribeId);
     if (!subscribe) throw new HttpException('Subscribe not found', 404);
+    const amount = this.toMoney(subscribe.price);
+    const amountCents = this.getStripeAmount(amount);
+    const billingEmail = this.getBillingEmail(payload.billingEmail, user.email);
 
     // Already paid check
     const existingCompleted = await this.paymentModel.findOne({
@@ -226,42 +434,41 @@ export class PaymentService {
     const existingPending = await this.paymentModel.findOne({
       userId: user._id,
       subscribeId: subscribe._id,
-      status: 'pending',
+      status: { $in: ['pending', 'failed'] },
     });
 
-    if (existingPending?.stripePaymentIntentId) {
-      const existingIntent = await this.stripe.paymentIntents.retrieve(
-        existingPending.stripePaymentIntentId,
-      );
-      if (
-        existingIntent.status !== 'succeeded' &&
-        existingIntent.status !== 'canceled'
-      ) {
-        return {
-          clientSecret: existingIntent.client_secret,
-          paymentIntentId: existingIntent.id,
-          amount: subscribe.price,
-        };
-      }
+    const existingIntent = await this.getReusableIntent(existingPending, amount, billingEmail, payload.forceNew);
+    if (existingIntent) {
+      return {
+        clientSecret: existingIntent.client_secret,
+        paymentIntentId: existingIntent.id,
+        amount,
+        currency: 'usd',
+        billingEmail,
+      };
     }
 
     // Create new payment intent
     const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: Math.round(subscribe.price * 100),
+      amount: amountCents,
       currency: 'usd',
+      receipt_email: billingEmail,
       automatic_payment_methods: { enabled: true },
       metadata: {
         userId: user._id.toString(),
         subscribeId: subscribe._id.toString(),
         paymentType: 'subscribe',
-        amount: String(subscribe.price),
+        amount: String(amount),
       },
     });
 
     // Save or update payment record
     if (existingPending) {
       existingPending.stripePaymentIntentId = paymentIntent.id;
-      existingPending.amount = subscribe.price;
+      existingPending.amount = amount;
+      existingPending.status = 'pending';
+      existingPending.currency = 'usd';
+      existingPending.email = billingEmail;
       await existingPending.save();
     } else {
       await this.paymentModel.create({
@@ -269,9 +476,10 @@ export class PaymentService {
         subscribeId: subscribe._id,
         // schoolName string হিসেবে save করতে চাইলে
         // School model থেকে populate করে নাও, অথবা user.email দাও
-        email: user.email,
+        email: billingEmail,
         stripePaymentIntentId: paymentIntent.id,
-        amount: subscribe.price,
+        amount,
+        currency: 'usd',
         paymentType: 'subscribe',
         status: 'pending',
       });
@@ -280,7 +488,9 @@ export class PaymentService {
     return {
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
-      amount: subscribe.price,
+      amount,
+      currency: 'usd',
+      billingEmail,
     };
   }
 
@@ -504,6 +714,7 @@ export class PaymentService {
   ) {
     const user = await this.userModel.findById(userId);
     if (!user) throw new HttpException('User not found', 404);
+    const billingEmail = this.getBillingEmail(payload.billingEmail, user.email);
 
     const school = await this.schoolModel.findById(schoolId);
     if (!school) throw new HttpException('School not found', 404);
@@ -523,6 +734,7 @@ export class PaymentService {
       paymentPlan,
       schoolPayments,
     );
+    const amountCents = this.getStripeAmount(amounts.amount);
 
     const existingOfflinePending = await this.paymentModel.findOne({
       userId: user._id,
@@ -541,45 +753,28 @@ export class PaymentService {
     const existingPending = await this.paymentModel.findOne({
       userId: user._id,
       schoolId: school._id,
-      status: 'pending',
+      status: { $in: ['pending', 'failed'] },
       paymentType: 'school',
     });
 
-    if (!payload.forceNew && existingPending?.stripePaymentIntentId) {
-      try {
-        const existingIntent = await this.stripe.paymentIntents.retrieve(
-          existingPending.stripePaymentIntentId,
-        );
-        const amountMatches =
-          existingPending.amount === amounts.amount &&
-          (existingPending.termId || existingPending.paymentPlan) === paymentPlan;
-
-        if (
-          amountMatches &&
-          existingIntent.currency === 'usd' &&
-          existingIntent.status !== 'succeeded' &&
-          existingIntent.status !== 'canceled'
-        ) {
-          return {
-            clientSecret: existingIntent.client_secret,
-            paymentIntentId: existingIntent.id,
-            amount: existingPending.amount,
-            totalStudents: existingPending.totalStudents,
-            perStudentCharge: existingPending.perStudentCharge,
-            totalAmount: existingPending.totalAmount,
-            termId: existingPending.termId || existingPending.paymentPlan,
-            termLabel: existingPending.termLabel,
-          };
-        }
-      } catch {
-        // Stale intents can happen after Stripe key/account changes. Refresh below.
-      }
+    const existingIntent = await this.getReusableIntent(
+      existingPending, amounts.amount, billingEmail, payload.forceNew, paymentPlan,
+    );
+    if (existingIntent) {
+      return {
+        clientSecret: existingIntent.client_secret,
+        paymentIntentId: existingIntent.id,
+        ...amounts,
+        currency: 'usd',
+        billingEmail,
+      };
     }
 
     // Create new payment intent
     const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: Math.round(amounts.amount * 100),
+      amount: amountCents,
       currency: 'usd',
+      receipt_email: billingEmail,
       automatic_payment_methods: { enabled: true },
       metadata: {
         userId: user._id.toString(),
@@ -599,6 +794,9 @@ export class PaymentService {
     if (existingPending) {
       existingPending.stripePaymentIntentId = paymentIntent.id;
       existingPending.amount = amounts.amount;
+      existingPending.status = 'pending';
+      existingPending.currency = 'usd';
+      existingPending.email = billingEmail;
       existingPending.totalStudents = amounts.totalStudents;
       existingPending.perStudentCharge = amounts.perStudentCharge;
       existingPending.totalAmount = amounts.totalAmount;
@@ -620,9 +818,10 @@ export class PaymentService {
         userId: user._id,
         schoolId: school._id,
         schoolName: school.name,
-        email: user.email,
+        email: billingEmail,
         stripePaymentIntentId: paymentIntent.id,
         amount: amounts.amount,
+        currency: 'usd',
         totalStudents: amounts.totalStudents,
         perStudentCharge: amounts.perStudentCharge,
         totalAmount: amounts.totalAmount,
@@ -647,6 +846,8 @@ export class PaymentService {
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
       ...amounts,
+      currency: 'usd',
+      billingEmail,
     };
   }
 
@@ -657,6 +858,7 @@ export class PaymentService {
   ) {
     const user = await this.userModel.findById(userId);
     if (!user) throw new HttpException('User not found', 404);
+    const billingEmail = this.getBillingEmail(payload.billingEmail, user.email);
 
     const school = await this.schoolModel.findById(schoolId);
     if (!school) throw new HttpException('School not found', 404);
@@ -685,6 +887,8 @@ export class PaymentService {
     });
     if (existingOfflinePending) {
       existingOfflinePending.amount = amounts.amount;
+      existingOfflinePending.currency = 'usd';
+      existingOfflinePending.email = billingEmail;
       existingOfflinePending.totalStudents = amounts.totalStudents;
       existingOfflinePending.perStudentCharge = amounts.perStudentCharge;
       existingOfflinePending.totalAmount = amounts.totalAmount;
@@ -709,8 +913,9 @@ export class PaymentService {
       userId: user._id,
       schoolId: school._id,
       schoolName: school.name,
-      email: user.email,
+      email: billingEmail,
       amount: amounts.amount,
+      currency: 'usd',
       totalStudents: amounts.totalStudents,
       perStudentCharge: amounts.perStudentCharge,
       totalAmount: amounts.totalAmount,
