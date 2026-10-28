@@ -28,6 +28,18 @@ export class UserService {
     private readonly schoolModel: Model<SchoolDocument>,
   ) {}
 
+  private async withSchoolPopulation(user: UserDocument) {
+    if (!user.schoolName) return user;
+
+    const school = await this.schoolModel
+      .findById(user.schoolName)
+      .select('totalStudent');
+
+    // School population is authoritative; the user value is a legacy fallback.
+    if (school?.totalStudent == null) return user;
+    return { ...user.toObject(), totalStudent: school.totalStudent };
+  }
+
   async createUser(
     createUserDto: CreateUserDto,
     files?: {
@@ -170,7 +182,13 @@ export class UserService {
       .sort({ [sortBy]: sortOrder } as any)
       .populate('schoolName');
 
-    return { meta: { page, limit, total }, data: users };
+    const data = users.map((user) => {
+      const school = user.schoolName as unknown as School | null;
+      return school?.totalStudent == null
+        ? user
+        : { ...user.toObject(), totalStudent: school.totalStudent };
+    });
+    return { meta: { page, limit, total }, data };
   }
 
   async getSingleUser(id: string) {
@@ -178,7 +196,7 @@ export class UserService {
     if (!user) {
       throw new HttpException('User not found', 404);
     }
-    return user;
+    return this.withSchoolPopulation(user);
   }
 
   async updateUser(
@@ -217,7 +235,7 @@ export class UserService {
       updateUserDto,
       { new: true },
     );
-    return updatedUser;
+    return updatedUser ? this.withSchoolPopulation(updatedUser) : updatedUser;
   }
 
   async deleteUser(id: string) {
@@ -234,7 +252,7 @@ export class UserService {
     if (!result) {
       throw new HttpException('User not found', 404);
     }
-    return result;
+    return this.withSchoolPopulation(result);
   }
 
   async updateMyProfile(
@@ -273,6 +291,6 @@ export class UserService {
       new: true,
     });
 
-    return result;
+    return result ? this.withSchoolPopulation(result) : result;
   }
 }
