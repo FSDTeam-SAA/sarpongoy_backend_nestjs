@@ -7,6 +7,8 @@ import { Model } from 'mongoose';
 import { IFilterParams } from 'src/app/helpers/pick';
 import paginationHelper, { IOptions } from 'src/app/helpers/pagenation';
 import buildWhereConditions from 'src/app/helpers/buildWhereConditions';
+import { Payment } from '../payment/entities/payment.entity';
+import { LOCKED_SCHOOL_PAYMENT_STATUSES } from '../../helpers/schoolPaymentLock';
 import { fileUpload } from 'src/app/helpers/fileUploder';
 
 @Injectable()
@@ -14,6 +16,8 @@ export class SchoolService {
   constructor(
     @InjectModel(School.name)
     private readonly schoolModel: Model<School>,
+    @InjectModel(Payment.name)
+    private readonly paymentModel: Model<Payment>,
   ) {}
 
   private toMoney(value: unknown) {
@@ -251,11 +255,20 @@ export class SchoolService {
     };
   }
 
+  private async areTermsLocked(id: string) {
+    return Boolean(await this.paymentModel.exists({
+      schoolId: id,
+      paymentType: 'school',
+      status: { $in: LOCKED_SCHOOL_PAYMENT_STATUSES },
+    }));
+  }
+
   async getSingleSchool(id: string) {
     const school = await this.schoolModel.findById(id).populate('school');
     if (!school) {
       throw new HttpException('School not found', 404);
     }
+    school.termsLocked = await this.areTermsLocked(id);
     return school;
   }
 
@@ -268,6 +281,7 @@ export class SchoolService {
       const {url} = await fileUpload.uploadToCloudinary(file);
       updateSchoolDto.NDA = url;
     }
+    school.termsLocked = await this.areTermsLocked(id);
     this.buildContractConfig(updateSchoolDto, school);
     const termConfig = this.buildTermConfig(updateSchoolDto);
     if (termConfig) updateSchoolDto['termConfig'] = termConfig;

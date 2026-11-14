@@ -1,3 +1,4 @@
+import { hasLockedSchoolPayments } from '../../helpers/schoolPaymentLock';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -1066,7 +1067,7 @@ export class PaymentService {
         perStudentCharge: school.subscribePrice || 0,
         totalContractAmount: school.totalContractAmount || 0,
         paymentTerms,
-        termsLocked: Boolean(school.termsLocked || schoolPayments.length),
+        termsLocked: hasLockedSchoolPayments(schoolPayments),
         activeTerm: status.activeTerm,
         overdueTerm: status.overdueTerm,
         isRestricted: status.isRestricted,
@@ -1323,7 +1324,7 @@ export class PaymentService {
       schoolAccounts,
       termConfig: school.termConfig || {},
       paymentTerms,
-      termsLocked: Boolean(school.termsLocked || paymentList.length),
+      termsLocked: hasLockedSchoolPayments(paymentList),
       paymentAccessStatus: status.isRestricted ? 'restricted' : 'active',
       activeTerm: status.activeTerm,
       overdueTerm: status.overdueTerm,

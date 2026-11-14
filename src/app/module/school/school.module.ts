@@ -1,3 +1,4 @@
+import { Payment, PaymentSchema } from '../payment/entities/payment.entity';
 import { Module } from '@nestjs/common';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
@@ -9,6 +10,7 @@ import { User, UserSchema } from '../user/entities/user.entity';
   imports: [
     MongooseModule.forFeature([
       { name: School.name, schema: SchoolSchema },
+      { name: Payment.name, schema: PaymentSchema },
       { name: User.name, schema: UserSchema },
     ]),
   ],
