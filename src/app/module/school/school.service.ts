@@ -8,7 +8,7 @@ import { IFilterParams } from 'src/app/helpers/pick';
 import paginationHelper, { IOptions } from 'src/app/helpers/pagenation';
 import buildWhereConditions from 'src/app/helpers/buildWhereConditions';
 import { Payment } from '../payment/entities/payment.entity';
-import { LOCKED_SCHOOL_PAYMENT_STATUSES } from '../../helpers/schoolPaymentLock';
+import { LOCKED_SCHOOL_PAYMENT_STATUSES, getLockedSchoolTermIds } from '../../helpers/schoolPaymentLock';
 import { fileUpload } from 'src/app/helpers/fileUploder';
 
 @Injectable()
@@ -255,12 +255,15 @@ export class SchoolService {
     };
   }
 
-  private async areTermsLocked(id: string) {
-    return Boolean(await this.paymentModel.exists({
-      schoolId: id,
-      paymentType: 'school',
-      status: { $in: LOCKED_SCHOOL_PAYMENT_STATUSES },
-    }));
+  private async getTermLocks(school: any) {
+    const terms = school.paymentTerms?.length ? school.paymentTerms : this.buildDefaultTerms(
+      school.totalContractAmount || Number(school.subscribePrice || 0) * Number(school.totalStudent || 0),
+    );
+    const legacyDates = [school.termConfig?.firstTermDueDate, school.termConfig?.secondTermDueDate, school.termConfig?.thirdTermDueDate];
+    const effectiveTerms = terms.map((term, index) => ({ ...term.toObject?.() || term, dueDate: term.dueDate || (legacyDates[index] ? new Date(legacyDates[index]).toISOString().slice(0, 10) : undefined) }));
+    const payments = await this.paymentModel.find({ schoolId: school._id, paymentType: 'school', status: { $in: LOCKED_SCHOOL_PAYMENT_STATUSES } });
+    const lockedTermIds = getLockedSchoolTermIds(terms, payments);
+    return { terms: effectiveTerms, lockedTermIds, termsLocked: terms.every(term => lockedTermIds.includes(term.termId)) };
   }
 
   async getSingleSchool(id: string) {
@@ -268,8 +271,8 @@ export class SchoolService {
     if (!school) {
       throw new HttpException('School not found', 404);
     }
-    school.termsLocked = await this.areTermsLocked(id);
-    return school;
+    const locks = await this.getTermLocks(school);
+    return { ...school.toObject(), termsLocked: locks.termsLocked, lockedTermIds: locks.lockedTermIds };
   }
 
   async updateSchool(id: string, updateSchoolDto: UpdateSchoolDto, file?: Express.Multer.File) {
@@ -281,8 +284,18 @@ export class SchoolService {
       const {url} = await fileUpload.uploadToCloudinary(file);
       updateSchoolDto.NDA = url;
     }
-    school.termsLocked = await this.areTermsLocked(id);
-    this.buildContractConfig(updateSchoolDto, school);
+    const locks = await this.getTermLocks(school);
+    this.buildContractConfig(updateSchoolDto, { subscribePrice: school.subscribePrice, totalStudent: school.totalStudent });
+    const proposed = (updateSchoolDto as any).paymentTerms;
+    if (Array.isArray(proposed)) {
+      if (new Set(proposed.map(term => term.termId)).size !== proposed.length) throw new HttpException('Payment term IDs must be unique', 400);
+      for (const original of locks.terms.filter(term => locks.lockedTermIds.includes(term.termId))) {
+        const next = proposed.find(term => term.termId === original.termId);
+        if (!next || next.label !== original.label || this.toCents(next.amount) !== this.toCents(original.amount) || (next.dueDate || '') !== (original.dueDate || '')) {
+          throw new HttpException('Paid or awaiting-approval payment terms cannot be changed. Edit an upcoming or failed term instead.', 400);
+        }
+      }
+    }
     const termConfig = this.buildTermConfig(updateSchoolDto);
     if (termConfig) updateSchoolDto['termConfig'] = termConfig;
 
